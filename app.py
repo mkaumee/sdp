@@ -1,8 +1,10 @@
 # app.py — Backend server for ClimateSmart AI (grew out of Satellite Finder).
-# It does three jobs:
+# It does five jobs:
 #   1. /api/search       -> turns a place name into coordinates (geocoding).
 #   2. /api/analyze      -> scores an area for a data centre or township using satellite data (see analysis.py).
-#   3. /api/image        -> downloads a NASA GIBS satellite picture of an area.
+#   3. /api/vision-check -> Claude Opus looks at satellite photos of the best spots (optional, needs an API key).
+#   4. /api/chat         -> Claude Haiku answers questions and highlights areas on the map (optional, same key).
+#   5. /api/image        -> downloads a NASA GIBS satellite picture of an area.
 # It also serves the front-end files (Design.Html, Design.Css, Design.Js and the Leaflet map library).
 #
 # Run it with:   pip install -r requirements.txt   then   python app.py
@@ -10,11 +12,12 @@
 
 import os  # os lets us build file paths that work on any operating system
 from datetime import date, timedelta  # date/timedelta are used to validate and default the image date
-from functools import lru_cache  # remembers recent analyses so repeat requests are instant
+from functools import lru_cache  # remembers recent analyses so the AI features don't redo the work
 
 import requests  # requests is the library we use to call other web APIs (NASA, OpenStreetMap)
 from flask import Flask, Response, abort, jsonify, request, send_from_directory  # Flask pieces for building the web server
 
+import ai  # Claude vision check and chat
 import analysis  # scoring and recommendations
 import datasources  # satellite data readers
 from datasources import bounding_box  # square area around a point, in degrees
@@ -162,6 +165,43 @@ def analyze():
     except datasources.DataUnavailable as err:  # the satellite data couldn't be downloaded
         app.logger.warning("Analysis failed: %s", err)
         return jsonify(error="Satellite data service unavailable. Check your internet connection and try again."), 502
+
+
+VISION_RESULTS = {}  # settings -> last vision check, so the chat can use its findings
+MAX_VISION_RESULTS = 32  # forget the oldest checks beyond this
+
+
+@app.route("/api/vision-check", methods=["POST"])  # browser posts the same settings it used for /api/analyze
+def vision_check():
+    settings, error = read_analysis_args(request.get_json(silent=True) or {})  # validate the input
+    if error:
+        return jsonify(error=error), 400
+    try:
+        result = cached_analysis(*settings)  # normally already in the cache, so this is instant
+        checked = ai.vision_check(result)  # satellite photos of the best spots -> Claude Opus
+    except datasources.DataUnavailable:  # analysis data or imagery tiles couldn't be downloaded
+        return jsonify(error="Satellite imagery unavailable. Check your internet connection and try again."), 502
+    except ai.AIError as err:
+        return jsonify(error=str(err)), err.status
+    VISION_RESULTS[settings] = checked  # remember it for the chat
+    while len(VISION_RESULTS) > MAX_VISION_RESULTS:
+        VISION_RESULTS.pop(next(iter(VISION_RESULTS)))  # drop the oldest
+    return jsonify(checked)
+
+
+@app.route("/api/chat", methods=["POST"])  # browser posts the settings plus the conversation so far
+def chat():
+    body = request.get_json(silent=True) or {}  # {"lat":..,"lon":..,"area":..,"purpose":..,"scale":..,"messages":[..]}
+    settings, error = read_analysis_args(body)  # validate the analysis settings
+    if error:
+        return jsonify(error=error), 400
+    try:
+        result = cached_analysis(*settings)  # the analysis the user is looking at
+        return jsonify(ai.chat(result, body.get("messages"), VISION_RESULTS.get(settings)))  # Claude Haiku answers
+    except datasources.DataUnavailable:
+        return jsonify(error="Satellite data service unavailable"), 502
+    except ai.AIError as err:
+        return jsonify(error=str(err)), err.status
 
 
 @app.route("/api/image")  # browser calls /api/image?lat=..&lon=..&layer=..&date=..&size=..
