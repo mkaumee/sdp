@@ -3,69 +3,110 @@
 <head> <!-- head = settings and links, not shown on screen -->
   <meta charset="UTF-8"> <!-- use UTF-8 text so symbols like ° and · display correctly -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0"> <!-- make the page fit phone screens -->
-  <title>Satellite Finder</title> <!-- text shown on the browser tab -->
+  <title>ClimateSmart AI</title> <!-- text shown on the browser tab -->
+  <link rel="stylesheet" href="vendor/leaflet/leaflet.css"> <!-- styles for the interactive map -->
   <link rel="stylesheet" href="Design.Css"> <!-- load our styles -->
 </head> <!-- end of head -->
 <body> <!-- body = everything visible on the page -->
-  <header> <!-- top section with the title -->
-    <h1>Satellite Finder</h1> <!-- big page title -->
-    <p class="sub">Search any place and see it from orbit — imagery from NASA GIBS</p> <!-- subtitle -->
-  </header> <!-- end of header -->
+  <header class="topbar"> <!-- thin bar across the top -->
+    <div class="brand"> <!-- logo and name -->
+      <span class="logo" aria-hidden="true">◉</span> <!-- simple round "satellite view" logo -->
+      <div> <!-- name and tagline stacked -->
+        <h1>ClimateSmart AI</h1> <!-- app name -->
+        <p class="sub">Satellite site finder for sustainable data centres &amp; townships</p> <!-- tagline -->
+      </div>
+    </div>
+  </header> <!-- end of top bar -->
 
-  <main> <!-- main content area -->
-    <form id="search-form" autocomplete="off"> <!-- the search form; browser autocomplete turned off -->
-      <div class="search-row"> <!-- row holding the text box and button side by side -->
-        <input id="place" type="text" placeholder="Search a place, e.g. Grand Canyon, Tokyo, Mount Everest" required> <!-- where you type the place; "required" blocks empty searches -->
-        <button type="submit" id="search-btn">Search</button> <!-- clicking this submits the form -->
-      </div> <!-- end of search row -->
+  <div class="layout"> <!-- side panel on the left, map on the right -->
+    <aside class="panel"> <!-- everything you read and click, beside the map -->
+      <form id="search-form" autocomplete="off"> <!-- place search; browser autocomplete turned off -->
+        <div class="search-row"> <!-- text box and button side by side -->
+          <input id="place" type="text" placeholder="Search a place, e.g. Cyberjaya" aria-label="Place name"> <!-- where you type -->
+          <button type="submit" id="search-btn">Search</button> <!-- runs the search -->
+        </div>
+      </form>
+      <ul id="suggestions" hidden></ul> <!-- other matching places; filled by Design.Js -->
+      <p class="hint">…or click anywhere on the map. Try: <!-- quick demo places -->
+        <button type="button" class="chip" data-q="Cyberjaya, Malaysia">Cyberjaya</button>
+        <button type="button" class="chip" data-q="Kulai, Johor">Kulai, Johor</button>
+        <button type="button" class="chip" data-q="Elmina, Shah Alam">Elmina</button>
+        <button type="button" class="chip" data-q="Bukit Raja, Klang">Bukit Raja</button>
+      </p>
 
-      <div class="options"> <!-- row of extra settings -->
-        <label>Imagery <!-- label for the imagery dropdown -->
-          <select id="layer"> <!-- dropdown of NASA imagery layers; value = NASA layer name, data-res = metres per pixel -->
-            <option value="HLS_S30_Nadir_BRDF_Adjusted_Reflectance" data-res="30">Sentinel‑2 (HLS, 30 m)</option> <!-- sharp, not daily -->
-            <option value="HLS_L30_Nadir_BRDF_Adjusted_Reflectance" data-res="30">Landsat (HLS, 30 m)</option> <!-- sharp, not daily -->
-            <option value="MODIS_Terra_CorrectedReflectance_TrueColor" data-res="250" selected>MODIS Terra (250 m, daily)</option> <!-- daily, default choice -->
-            <option value="VIIRS_SNPP_CorrectedReflectance_TrueColor" data-res="250">VIIRS SNPP (250 m, daily)</option> <!-- daily -->
-            <option value="BlueMarble_ShadedRelief_Bathymetry" data-res="500" data-static="1">Blue Marble (cloud‑free)</option> <!-- data-static = has no date -->
-          </select> <!-- end of imagery dropdown -->
-        </label> <!-- end of imagery label -->
-        <label>Date <!-- label for the date picker -->
-          <input id="date" type="date"> <!-- calendar picker; Design.Js fills in the default -->
-        </label> <!-- end of date label -->
-        <label>Area width <!-- label for the area size dropdown -->
-          <select id="size"> <!-- how many km wide the image should cover -->
-            <option value="5">5 km</option> <!-- neighbourhood -->
-            <option value="20">20 km</option> <!-- city -->
-            <option value="50">50 km</option> <!-- metro area -->
-            <option value="150" selected>150 km</option> <!-- region (default) -->
-            <option value="500">500 km</option> <!-- small country -->
-            <option value="1500">1500 km</option> <!-- large country -->
-          </select> <!-- end of size dropdown -->
-        </label> <!-- end of size label -->
-      </div> <!-- end of options row -->
-    </form> <!-- end of form -->
+      <fieldset class="controls"> <!-- what we're planning -->
+        <legend class="sr-only">Project settings</legend> <!-- name for screen readers -->
+        <div class="seg" role="radiogroup" aria-label="What are you planning?"> <!-- two-way switch -->
+          <button type="button" role="radio" aria-checked="true" data-purpose="datacentre">🖥️ Data centre</button>
+          <button type="button" role="radio" aria-checked="false" data-purpose="township">🏘️ Township</button>
+        </div>
+        <div class="row"> <!-- size and area side by side -->
+          <label><span id="scale-label">IT load (MW)</span> <!-- label changes with the purpose -->
+            <input id="scale" type="number" min="1" max="500" step="1" value="30"> <!-- MW, or new residents -->
+          </label>
+          <label>Area width <!-- how much land around the point to check -->
+            <select id="area">
+              <option value="2">2 km</option>
+              <option value="5">5 km</option>
+              <option value="10" selected>10 km</option>
+              <option value="20">20 km</option>
+              <option value="30">30 km</option>
+            </select>
+          </label>
+        </div>
+      </fieldset>
 
-    <ul id="suggestions" hidden></ul> <!-- list of other matching places; filled by Design.Js, hidden at first -->
+      <p id="status" role="status">Pick a place to analyse.</p> <!-- messages; screen readers announce changes -->
 
-    <p id="status" role="status"></p> <!-- message line; role="status" makes screen readers announce it -->
+      <section id="results" hidden> <!-- analysis results, hidden until there is one -->
+        <div class="score-card"> <!-- the headline number -->
+          <svg class="ring" viewBox="0 0 120 120" aria-hidden="true"> <!-- circular gauge -->
+            <circle cx="60" cy="60" r="52" class="ring-bg"></circle> <!-- grey track -->
+            <circle cx="60" cy="60" r="52" class="ring-fg" id="ring-fg"></circle> <!-- coloured part, length set by Design.Js -->
+          </svg>
+          <div class="ring-num"><strong id="score">–</strong><span>/100</span></div> <!-- score in the middle of the ring -->
+          <div class="score-text"> <!-- verdict and place -->
+            <div id="verdict" class="verdict"></div> <!-- e.g. "✓ Good fit" -->
+            <div id="place-name" class="place-name"></div> <!-- place and purpose -->
+            <div id="coords" class="muted small"></div> <!-- coordinates and area -->
+          </div>
+        </div>
 
-    <figure id="result" hidden> <!-- image box; hidden until there's a result -->
-      <div class="img-wrap"> <!-- frame around the image -->
-        <img id="sat-img" alt="Satellite image"> <!-- the satellite picture (src set by Design.Js) -->
-        <div id="loader" hidden><span></span></div> <!-- spinner overlay shown while loading -->
-      </div> <!-- end of frame -->
-      <figcaption> <!-- caption under the image -->
-        <strong id="place-name"></strong> <!-- place name -->
-        <span id="meta"></span> <!-- coordinates, layer, date, width -->
-        <a id="open-link" target="_blank" rel="noopener">Open full image</a> <!-- opens the picture in a new tab -->
-      </figcaption> <!-- end of caption -->
-    </figure> <!-- end of image box -->
-  </main> <!-- end of main content -->
+        <ul id="flags" class="flags"></ul> <!-- red flags -->
 
-  <footer> <!-- bottom credits -->
-    Imagery: NASA EOSDIS GIBS · Geocoding: © OpenStreetMap contributors <!-- data sources must be credited -->
-  </footer> <!-- end of footer -->
+        <h2>Why this score</h2> <!-- factor breakdown -->
+        <ul id="factors" class="factors"></ul>
 
-  <script src="Design.Js"></script> <!-- load our JavaScript last, after all elements exist -->
+        <h2>What the satellites see</h2> <!-- measured numbers -->
+        <div id="metrics" class="tiles"></div>
+        <div id="cover-bar" class="cover-bar" role="img"></div> <!-- land-cover stacked bar -->
+        <ul id="cover-legend" class="legend-list"></ul> <!-- its legend -->
+
+        <h2>Recommendations</h2>
+        <ol id="recs" class="recs"></ol>
+
+        <h2 id="spots-title">Best spots to build</h2> <!-- top cells from the grid -->
+        <ol id="spots" class="clicklist"></ol>
+
+        <h2 id="hot-title">Heat hotspots to green</h2> <!-- township only -->
+        <ol id="hotspots" class="clicklist"></ol>
+
+        <h2>Water budget <span class="muted small">(per year, rough estimate)</span></h2>
+        <table id="water" class="water"></table>
+
+        <details class="about"> <!-- data sources and assumptions, folded away -->
+          <summary>Data sources &amp; assumptions</summary>
+          <ul id="sources"></ul>
+          <ul id="assumptions"></ul>
+          <ul id="warnings" class="warn-list"></ul>
+        </details>
+      </section>
+    </aside>
+
+    <main id="map" aria-label="Map — click to analyse a location"></main> <!-- the interactive map -->
+  </div>
+
+  <script src="vendor/leaflet/leaflet.js"></script> <!-- the map library -->
+  <script src="Design.Js"></script> <!-- our JavaScript, last so all elements exist -->
 </body> <!-- end of visible content -->
 </html> <!-- end of page -->

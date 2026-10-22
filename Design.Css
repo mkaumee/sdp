@@ -1,148 +1,243 @@
-/* Design.Css — all the styling for Satellite Finder */
+/* Design.Css — all the styling for ClimateSmart AI */
 
 :root { /* :root = the whole page; variables defined here can be reused everywhere */
   --bg: #0b1020; /* page background (very dark blue) */
   --panel: #141b31; /* background for inputs and boxes */
+  --panel-2: #1a2340; /* slightly lighter boxes inside the panel */
   --line: #26304f; /* border colour */
   --text: #e8ecf8; /* main text colour (near white) */
   --muted: #94a0c0; /* softer grey-blue text for less important info */
-  --accent: #4f8cff; /* highlight blue for the button and links */
+  --accent: #4f8cff; /* highlight blue for buttons and links */
+  --bar: #3987e5; /* score bars (one hue: bar length carries the value) */
+  --good: #0ca30c; /* status: good fit */
+  --warning: #fab219; /* status: possible with mitigation */
+  --critical: #d03b3b; /* status: not recommended / red flag */
   --error: #ff6b6b; /* red for error messages */
+  --panel-w: 420px; /* width of the side panel on big screens */
 }
 
 * { box-sizing: border-box; } /* widths include padding and border, which makes sizing predictable */
 
-[hidden] { display: none !important; } /* anything with the "hidden" attribute is truly hidden, even if a rule below gives it display: grid/flex */
+[hidden] { display: none !important; } /* anything with the "hidden" attribute is truly hidden */
+
+html, body { height: 100%; } /* the page fills the window so the map can too */
 
 body { /* the whole visible page */
   margin: 0; /* remove the browser's default gap around the page */
-  min-height: 100vh; /* at least as tall as the window */
   display: flex; /* flexbox layout... */
-  flex-direction: column; /* ...stacking header, main, footer vertically */
-  background: radial-gradient(ellipse at top, #1a2550 0%, var(--bg) 60%); /* blue glow at the top fading to dark */
+  flex-direction: column; /* ...top bar above, panel+map below */
+  background: var(--bg); /* dark page background */
   color: var(--text); /* default text colour */
-  font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; /* 15px text, 1.5 line spacing, system font */
+  font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; /* 14px text, system font */
 }
 
-header, main, footer { /* the three main sections */
-  width: 100%; /* full width... */
-  max-width: 900px; /* ...but never wider than 900px */
-  margin: 0 auto; /* centre them horizontally */
-  padding: 0 16px; /* 16px gap on the left and right edges */
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); } /* only for screen readers */
+.muted { color: var(--muted); } /* grey text */
+.small { font-size: 0.8rem; } /* small text */
+
+/* ---------- Top bar ---------- */
+.topbar { /* bar across the top */
+  display: flex; /* items in a row */
+  align-items: center; /* vertically centred */
+  padding: 10px 16px; /* inner spacing */
+  background: radial-gradient(ellipse at top left, #1a2550 0%, var(--bg) 70%); /* blue glow like the original design */
+  border-bottom: 1px solid var(--line); /* thin line under it */
 }
+.brand { display: flex; align-items: center; gap: 10px; } /* logo beside the name */
+.logo { font-size: 1.8rem; color: #35c48a; line-height: 1; } /* green round logo */
+h1 { margin: 0; font-size: 1.25rem; letter-spacing: -0.01em; } /* app name */
+.sub { margin: 0; color: var(--muted); font-size: 0.85rem; } /* tagline */
 
-header { padding-top: 40px; text-align: center; } /* space above the title, centred text */
-h1 { margin: 0; font-size: 2.2rem; letter-spacing: -0.02em; } /* big title, slightly tighter letters */
-.sub { margin: 6px 0 28px; color: var(--muted); } /* subtitle: small gap above, bigger gap below, grey */
+/* ---------- Panel + map layout ---------- */
+.layout { flex: 1; display: flex; min-height: 0; } /* fills the rest of the window; min-height lets children scroll */
+.panel { /* the left column */
+  width: var(--panel-w); /* fixed width on big screens */
+  flex: none; /* never squeeze it */
+  overflow-y: auto; /* scroll the panel, not the page */
+  padding: 14px 16px 32px; /* inner spacing */
+  border-right: 1px solid var(--line); /* line between panel and map */
+}
+#map { flex: 1; min-width: 0; background: #0f1426; } /* map takes all remaining space; dark while tiles load */
 
-main { flex: 1; position: relative; } /* main grows to push the footer to the bottom */
-
-.search-row { display: flex; gap: 8px; } /* text box and button side by side, 8px apart */
+/* ---------- Form controls ---------- */
+.search-row { display: flex; gap: 8px; } /* text box and button side by side */
 
 input, select, button { /* shared look for all form controls */
-  font: inherit; /* use the page font instead of the browser default */
+  font: inherit; /* use the page font */
   color: var(--text); /* light text */
   background: var(--panel); /* dark panel background */
   border: 1px solid var(--line); /* thin border */
   border-radius: 10px; /* rounded corners */
 }
+#place { flex: 1; min-width: 0; padding: 11px 14px; } /* search box fills the spare width */
+input:focus, select:focus, button:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; } /* blue focus ring */
 
-#place { flex: 1; min-width: 0; padding: 14px 16px; font-size: 1.05rem; } /* search box fills the spare width, roomy padding */
-input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1px; } /* blue ring on the control you're typing in */
-
-button { /* the Search button */
-  padding: 0 22px; /* horizontal padding */
+button { cursor: pointer; } /* hand cursor on every button */
+#search-btn { /* main blue button */
+  padding: 0 18px; /* horizontal padding */
   background: var(--accent); /* blue background */
   border-color: var(--accent); /* blue border */
   color: #fff; /* white text */
-  font-weight: 600; /* semi-bold text */
-  cursor: pointer; /* hand cursor on hover */
+  font-weight: 600; /* semi-bold */
 }
-button:hover { filter: brightness(1.1); } /* slightly brighter when hovered */
-button:disabled { opacity: 0.6; cursor: wait; } /* faded with a waiting cursor while searching */
-
-.options { /* row of extra settings */
-  display: flex; /* side by side */
-  flex-wrap: wrap; /* wrap onto new lines on narrow screens */
-  gap: 12px; /* space between them */
-  margin-top: 12px; /* space above the row */
-}
-.options label { /* each setting with its label */
-  display: flex; /* flexbox... */
-  flex-direction: column; /* ...label text above the control */
-  gap: 4px; /* small gap between label and control */
-  flex: 1 1 160px; /* share the row equally, each at least about 160px */
-  font-size: 0.8rem; /* small label text */
-  color: var(--muted); /* grey label text */
-}
-.options select, .options input { padding: 8px 10px; color-scheme: dark; } /* padding inside; dark-style calendar and dropdown popups */
+#search-btn:hover { filter: brightness(1.1); } /* slightly brighter when hovered */
+button:disabled { opacity: 0.6; cursor: wait; } /* faded while busy */
 
 #suggestions { /* list of other matching places */
-  list-style: none; /* no bullet points */
-  margin: 8px 0 0; /* small gap above */
+  list-style: none; /* no bullets */
+  margin: 6px 0 0; /* small gap above */
   padding: 4px; /* inner spacing */
-  background: var(--panel); /* dark panel background */
+  background: var(--panel); /* dark box */
   border: 1px solid var(--line); /* thin border */
   border-radius: 10px; /* rounded corners */
 }
-#suggestions li { /* each suggestion */
-  padding: 8px 12px; /* inner spacing */
-  border-radius: 6px; /* rounded hover highlight */
-  cursor: pointer; /* hand cursor, since it's clickable */
-}
+#suggestions li { padding: 6px 10px; border-radius: 6px; cursor: pointer; } /* each suggestion */
 #suggestions li:hover { background: var(--line); } /* highlight on hover */
-#suggestions small { display: block; color: var(--muted); } /* full name on its own line, in grey */
+#suggestions small { display: block; color: var(--muted); } /* full name in grey */
 
-#status { min-height: 1.5em; margin: 14px 0; color: var(--muted); } /* message line keeps its height even when empty */
+.hint { margin: 10px 0 0; color: var(--muted); font-size: 0.85rem; } /* "or click the map" line */
+.chip { /* quick demo place buttons */
+  padding: 2px 10px; /* small pill */
+  margin: 3px 2px 0 0; /* spacing between pills */
+  border-radius: 999px; /* fully rounded */
+  font-size: 0.8rem; /* small text */
+  background: var(--panel-2); /* slightly lighter than the panel */
+}
+.chip:hover { border-color: var(--accent); } /* blue border on hover */
+
+.controls { border: 0; padding: 0; margin: 14px 0 0; } /* remove the default fieldset box */
+.seg { display: flex; padding: 3px; gap: 3px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; } /* switch track */
+.seg button { flex: 1; padding: 8px 6px; border: 0; background: transparent; font-weight: 600; color: var(--muted); } /* each option */
+.seg button[aria-checked="true"] { background: var(--accent); color: #fff; } /* the chosen option */
+.row { display: flex; gap: 10px; margin-top: 10px; } /* size + area side by side */
+.row label { flex: 1; display: flex; flex-direction: column; gap: 4px; font-size: 0.8rem; color: var(--muted); } /* label above its control */
+.row input, .row select { padding: 8px 10px; color-scheme: dark; } /* dark-style pickers */
+
+#status { min-height: 1.5em; margin: 12px 0; color: var(--muted); } /* message line keeps its height */
 #status.error { color: var(--error); } /* red when it's an error */
 
-#result { margin: 0 0 32px; } /* image box: remove default figure margins, add space below */
+/* ---------- Results ---------- */
+h2 { font-size: 0.95rem; margin: 22px 0 8px; } /* section headings */
 
-.img-wrap { /* frame around the satellite image */
-  position: relative; /* lets the spinner overlay sit on top of the image */
-  background: #000; /* black while the image loads */
+.score-card { /* ring + verdict */
+  position: relative; /* lets the number sit on top of the ring */
+  display: grid; /* ring on the left, text on the right */
+  grid-template-columns: 96px 1fr; /* fixed ring size */
+  gap: 14px; /* space between */
+  align-items: center; /* vertically centred */
+  padding: 12px; /* inner spacing */
+  background: var(--panel); /* dark box */
   border: 1px solid var(--line); /* thin border */
-  border-radius: 12px; /* rounded corners */
-  overflow: hidden; /* clip the image to the rounded corners */
-  min-height: 200px; /* keep some height before the image arrives */
+  border-radius: 14px; /* rounded corners */
 }
-#sat-img { display: block; width: 100%; height: auto; } /* image fills the frame width, keeping its shape */
+.ring { width: 96px; height: 96px; transform: rotate(-90deg); } /* start the gauge at 12 o'clock */
+.ring circle { fill: none; stroke-width: 10; } /* thick round track */
+.ring-bg { stroke: var(--line); } /* grey track */
+.ring-fg { stroke: var(--good); stroke-linecap: round; transition: stroke-dashoffset 0.6s ease; } /* coloured progress, animated */
+.ring-num { position: absolute; left: 12px; top: 12px; width: 96px; height: 96px; display: grid; place-content: center; text-align: center; } /* number on top of the ring */
+.ring-num strong { font-size: 1.9rem; line-height: 1; } /* big score */
+.ring-num span { color: var(--muted); font-size: 0.75rem; } /* "/100" */
+.verdict { font-weight: 700; font-size: 1.05rem; } /* verdict text (colour set per level below) */
+.verdict.good { color: #4fd14f; } /* readable green on dark */
+.verdict.caution { color: var(--warning); } /* amber */
+.verdict.poor { color: #ff7b7b; } /* readable red on dark */
+.place-name { font-weight: 600; } /* place and purpose */
 
-#loader { /* dark overlay holding the spinner */
-  position: absolute; /* placed on top of the image... */
-  inset: 0; /* ...covering it edge to edge */
-  display: grid; /* grid layout... */
-  place-items: center; /* ...to centre the spinner */
-  background: rgba(0, 0, 0, 0.5); /* half-transparent black */
+.flags { list-style: none; padding: 0; margin: 10px 0 0; } /* red flag list */
+.flags li { /* each flag */
+  margin-top: 6px; /* gap between flags */
+  padding: 8px 10px 8px 34px; /* room for the icon */
+  border-radius: 10px; /* rounded */
+  background: rgba(208, 59, 59, 0.12); /* faint red */
+  border: 1px solid rgba(208, 59, 59, 0.45); /* red border */
+  position: relative; /* lets the icon be positioned */
 }
-#loader span { /* the spinner circle itself */
-  width: 42px; /* size */
-  height: 42px; /* size */
-  border: 4px solid rgba(255, 255, 255, 0.25); /* faint white ring */
-  border-top-color: #fff; /* one bright segment, which spins */
-  border-radius: 50%; /* make it a circle */
-  animation: spin 0.8s linear infinite; /* rotate forever, once every 0.8s */
-}
-@keyframes spin { to { transform: rotate(360deg); } } /* the "spin" animation: one full turn */
+.flags li::before { content: "⚠"; position: absolute; left: 11px; top: 7px; color: #ff7b7b; } /* warning icon (not colour alone) */
+.flags li.medium { background: rgba(250, 178, 25, 0.1); border-color: rgba(250, 178, 25, 0.45); } /* amber for medium flags */
+.flags li.medium::before { color: var(--warning); } /* amber icon */
 
-figcaption { /* caption under the image */
-  display: flex; /* items in a row */
-  flex-wrap: wrap; /* wrap on narrow screens */
-  align-items: baseline; /* line up the text baselines */
-  gap: 4px 12px; /* 4px between rows, 12px between items */
-  margin-top: 10px; /* space above */
-}
-#meta { color: var(--muted); font-size: 0.9rem; } /* details in smaller grey text */
-#open-link { margin-left: auto; color: var(--accent); } /* push the link to the right edge, blue */
+.factors { list-style: none; padding: 0; margin: 0; } /* factor list */
+.factors li { padding: 8px 0; border-bottom: 1px solid var(--line); } /* each factor, separated by a line */
+.factor-head { display: flex; justify-content: space-between; gap: 8px; } /* name left, score right */
+.factor-head .w { color: var(--muted); font-size: 0.75rem; } /* weight in grey */
+.factor-bar { height: 8px; margin: 6px 0 4px; background: var(--panel); border-radius: 4px; overflow: hidden; } /* bar track */
+.factor-bar span { display: block; height: 100%; background: var(--bar); border-radius: 0 4px 4px 0; } /* bar fill, rounded at the data end */
+.factor-bar.na span { width: 0; } /* no data */
+.factors p { margin: 0; color: var(--muted); font-size: 0.8rem; } /* explanation */
 
-footer { /* credits at the bottom */
-  padding-block: 20px; /* space above and below */
-  text-align: center; /* centred */
-  font-size: 0.8rem; /* small text */
-  color: var(--muted); /* grey */
-}
+.tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; } /* 3 stat tiles per row */
+.tile { padding: 8px 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; } /* one stat */
+.tile b { display: block; font-size: 1.1rem; } /* the number */
+.tile span { color: var(--muted); font-size: 0.75rem; } /* what it is */
 
-@media (max-width: 500px) { /* these rules apply only on screens 500px wide or less (phones) */
-  h1 { font-size: 1.7rem; } /* smaller title */
-  button { padding: 0 14px; } /* narrower button */
+.cover-bar { display: flex; gap: 2px; height: 14px; margin-top: 12px; } /* stacked bar with 2px gaps between segments */
+.cover-bar span { display: block; min-width: 2px; } /* one land-cover class */
+.cover-bar span:first-child { border-radius: 4px 0 0 4px; } /* rounded left end */
+.cover-bar span:last-child { border-radius: 0 4px 4px 0; } /* rounded right end */
+.legend-list { list-style: none; padding: 0; margin: 8px 0 0; display: grid; grid-template-columns: 1fr 1fr; gap: 2px 12px; font-size: 0.8rem; } /* 2-column legend */
+.legend-list li { display: flex; align-items: center; gap: 6px; } /* swatch + name + % */
+.legend-list i { width: 10px; height: 10px; border-radius: 2px; flex: none; } /* colour swatch */
+.legend-list em { margin-left: auto; font-style: normal; color: var(--muted); } /* percentage on the right */
+
+.recs { padding-left: 0; list-style: none; margin: 0; } /* recommendation list */
+.recs li { padding: 8px 10px; margin-bottom: 6px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; } /* one recommendation */
+.recs b { display: block; } /* title on its own line */
+.recs p { margin: 2px 0 0; color: var(--muted); font-size: 0.85rem; } /* explanation */
+.tag { margin-right: 6px; } /* emoji in front of the title */
+
+.clicklist { list-style: none; padding: 0; margin: 0; } /* best spots / hotspots */
+.clicklist li { /* each spot */
+  display: flex; /* number + text */
+  gap: 10px; /* space between */
+  padding: 8px 10px; /* inner spacing */
+  margin-bottom: 6px; /* gap below */
+  background: var(--panel); /* dark box */
+  border: 1px solid var(--line); /* thin border */
+  border-radius: 10px; /* rounded */
+  cursor: pointer; /* clickable */
+}
+.clicklist li:hover { border-color: var(--accent); } /* blue border on hover */
+.clicklist .num { /* round number badge */
+  flex: none; width: 24px; height: 24px; border-radius: 50%;
+  display: grid; place-content: center; font-weight: 700; font-size: 0.8rem;
+  background: var(--accent); color: #fff;
+}
+#hotspots .num { background: #eb6834; } /* orange badges for heat hotspots */
+.clicklist p { margin: 0; color: var(--muted); font-size: 0.8rem; } /* detail line */
+.empty { color: var(--muted); font-size: 0.85rem; } /* "none found" text */
+
+.water { width: 100%; border-collapse: collapse; font-size: 0.85rem; } /* water budget table */
+.water td { padding: 4px 0; border-bottom: 1px solid var(--line); } /* rows */
+.water td:last-child { text-align: right; font-variant-numeric: tabular-nums; } /* numbers right-aligned */
+
+.about { margin-top: 16px; color: var(--muted); font-size: 0.8rem; } /* folded sources box */
+.about summary { cursor: pointer; } /* clickable heading */
+.about ul { padding-left: 18px; } /* indented lists */
+.warn-list { color: var(--warning); } /* data warnings in amber */
+
+/* ---------- Map extras ---------- */
+.leaflet-container { font: inherit; } /* map popups use the page font */
+.map-legend { /* legend box drawn on the map */
+  padding: 8px 10px; background: rgba(11, 16, 32, 0.88); color: var(--text);
+  border: 1px solid var(--line); border-radius: 10px; font-size: 0.75rem; line-height: 1.4; max-width: 190px;
+}
+.map-legend b { display: block; margin-bottom: 4px; } /* legend title */
+.map-legend i { display: inline-block; width: 12px; height: 12px; margin-right: 6px; vertical-align: -2px; border-radius: 2px; } /* swatch */
+.spot-pin { /* numbered marker for best spots */
+  width: 28px; height: 28px; border-radius: 50%; display: grid; place-content: center;
+  background: var(--accent); color: #fff; font-weight: 700; border: 2px solid #fff; box-shadow: 0 1px 6px rgba(0, 0, 0, 0.5);
+}
+.cell-pop b { font-size: 1rem; } /* popup title */
+.cell-pop button { margin-top: 6px; padding: 4px 10px; background: var(--accent); border-color: var(--accent); color: #fff; } /* "Analyse here" */
+.leaflet-popup-content-wrapper, .leaflet-popup-tip { background: #141b31; color: var(--text); } /* dark popups */
+.leaflet-control-layers { background: #141b31; color: var(--text); } /* dark layer switcher */
+
+@media (max-width: 800px) { /* phones and small tablets: map on top, panel below */
+  .layout { flex-direction: column; } /* stack instead of side by side */
+  #map { flex: none; height: 55vh; order: -1; } /* map first, fixed height */
+  .panel { width: 100%; border-right: 0; overflow: visible; } /* panel full width, page scrolls */
+  body { height: auto; } /* let the page grow */
+  .tiles { grid-template-columns: repeat(2, 1fr); } /* 2 tiles per row */
+  .map-legend { font-size: 0.65rem; max-width: 130px; padding: 6px 8px; } /* smaller legend so it covers less map */
+  .map-legend .muted { display: none; } /* drop the extra note line */
 }
