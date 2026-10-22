@@ -1,20 +1,25 @@
-# app.py — Backend server for Satellite Finder.
-# It does two jobs:
-#   1. /api/search  -> turns a place name into coordinates (geocoding).
-#   2. /api/image   -> downloads the satellite image for those coordinates from NASA GIBS.
-# It also serves the front-end files (Design.Html, Design.Css, Design.Js).
+# app.py — Backend server for ClimateSmart AI (grew out of Satellite Finder).
+# It does three jobs:
+#   1. /api/search       -> turns a place name into coordinates (geocoding).
+#   2. /api/analyze      -> scores an area for a data centre or township using satellite data (see analysis.py).
+#   3. /api/image        -> downloads a NASA GIBS satellite picture of an area.
+# It also serves the front-end files (Design.Html, Design.Css, Design.Js and the Leaflet map library).
 #
 # Run it with:   pip install -r requirements.txt   then   python app.py
 # Then open:     http://127.0.0.1:5000
 
-import math  # math gives us cos() and pi, used to convert km into degrees of longitude
 import os  # os lets us build file paths that work on any operating system
 from datetime import date, timedelta  # date/timedelta are used to validate and default the image date
+from functools import lru_cache  # remembers recent analyses so repeat requests are instant
 
 import requests  # requests is the library we use to call other web APIs (NASA, OpenStreetMap)
 from flask import Flask, Response, abort, jsonify, request, send_from_directory  # Flask pieces for building the web server
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))  # the folder this file lives in (D:\Satellite)
+import analysis  # scoring and recommendations
+import datasources  # satellite data readers
+from datasources import bounding_box  # square area around a point, in degrees
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))  # the folder this file lives in
 
 # NASA GIBS (Global Imagery Browse Services) WMS endpoint — NASA's satellite imagery API, no key needed.
 NASA_GIBS_WMS = "https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi"
@@ -22,7 +27,7 @@ NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"  # main place-name 
 OPEN_METEO_URL = "https://geocoding-api.open-meteo.com/v1/search"  # backup place-name search service
 
 # OpenStreetMap asks every app to identify itself with a User-Agent header.
-HEADERS = {"User-Agent": "SatelliteFinder/1.0 (learning project)"}
+HEADERS = {"User-Agent": "ClimateSmartAI/1.0 (hackathon project)"}
 
 # Every NASA imagery layer we allow, mapped to its detail level in metres per pixel.
 LAYERS = {
@@ -38,11 +43,21 @@ MAX_PX = 1600  # biggest image size (in pixels) we will ask NASA for
 MIN_PX = 512  # smallest image size so small areas still look decent
 TIMEOUT = 30  # seconds to wait for an outside API before giving up
 
+AREA_KM = (1, 30)  # smallest and largest area width the analysis accepts
+SIZE_LIMITS = {"datacentre": (1, 500), "township": (100, 1_000_000)}  # MW, or new residents
+
 # Only these files may be downloaded by the browser, with the correct content type for each.
 FRONTEND_FILES = {
     "Design.Html": "text/html",  # the page itself
     "Design.Css": "text/css",  # the styles
     "Design.Js": "application/javascript",  # the browser-side code
+    "vendor/leaflet/leaflet.js": "application/javascript",  # the interactive map library
+    "vendor/leaflet/leaflet.css": "text/css",  # its styles
+    "vendor/leaflet/images/layers.png": "image/png",  # icons used by the map's layer switcher
+    "vendor/leaflet/images/layers-2x.png": "image/png",
+    "vendor/leaflet/images/marker-icon.png": "image/png",
+    "vendor/leaflet/images/marker-icon-2x.png": "image/png",
+    "vendor/leaflet/images/marker-shadow.png": "image/png",
 }
 
 app = Flask(__name__)  # create the web server application
@@ -109,18 +124,44 @@ def search():
     return jsonify(places=places)  # send the list of places back to the browser as JSON
 
 
-def bounding_box(lat, lon, width_km):
-    """Return (min_lat, min_lon, max_lat, max_lon) for a square area width_km wide centred on lat/lon."""
-    km_per_deg_lat = 111.32  # one degree of latitude is always about 111.32 km
-    km_per_deg_lon = 111.32 * max(math.cos(math.radians(lat)), 0.01)  # longitude degrees shrink towards the poles
-    half_lat = width_km / 2 / km_per_deg_lat  # half the box height, in degrees
-    half_lon = width_km / 2 / km_per_deg_lon  # half the box width, in degrees
-    return (
-        max(lat - half_lat, -90),  # bottom edge, never past the South Pole
-        max(lon - half_lon, -180),  # left edge, never past -180°
-        min(lat + half_lat, 90),  # top edge, never past the North Pole
-        min(lon + half_lon, 180),  # right edge, never past +180°
-    )
+def read_analysis_args(args):
+    """Check the analysis settings sent by the browser. Returns (settings, error message)."""
+    try:
+        lat = float(args["lat"])  # latitude of the site
+        lon = float(args["lon"])  # longitude of the site
+        width_km = float(args.get("area", 10))  # how wide an area to analyse, default 10 km
+        size = float(args.get("scale", 30))  # MW for a data centre, new residents for a township
+    except (KeyError, TypeError, ValueError):  # a value was missing or not a number
+        return None, "lat, lon, area and scale must be numbers"
+    purpose = args.get("purpose", "datacentre")  # what is being planned
+    if purpose not in analysis.PURPOSES:  # only the purposes we know how to score
+        return None, "purpose must be 'datacentre' or 'township'"
+    low, high = SIZE_LIMITS[purpose]  # sensible range for this purpose
+    if not (-60 <= lat <= 72 and -180 <= lon <= 180):  # population data only covers 56°S to 71°N
+        return None, "Pick a place between 60°S and 72°N"
+    if not (AREA_KM[0] <= width_km <= AREA_KM[1]):  # keep downloads small and fast
+        return None, f"Area width must be {AREA_KM[0]}-{AREA_KM[1]} km"
+    if not (low <= size <= high):
+        return None, f"Size must be between {low:g} and {high:g}"
+    return (round(lat, 5), round(lon, 5), width_km, purpose, size), None  # rounding makes the cache work
+
+
+@lru_cache(maxsize=32)  # keep the last 32 analyses in memory
+def cached_analysis(lat, lon, width_km, purpose, size):
+    """Run (or reuse) an analysis. The result must not be modified by callers."""
+    return analysis.analyse(lat, lon, width_km, purpose, size)
+
+
+@app.route("/api/analyze")  # browser calls /api/analyze?lat=..&lon=..&area=10&purpose=datacentre&scale=30
+def analyze():
+    settings, error = read_analysis_args(request.args)  # validate the input
+    if error:
+        return jsonify(error=error), 400  # tell the browser what was wrong
+    try:
+        return jsonify(cached_analysis(*settings))  # run the analysis and send it back as JSON
+    except datasources.DataUnavailable as err:  # the satellite data couldn't be downloaded
+        app.logger.warning("Analysis failed: %s", err)
+        return jsonify(error="Satellite data service unavailable. Check your internet connection and try again."), 502
 
 
 @app.route("/api/image")  # browser calls /api/image?lat=..&lon=..&layer=..&date=..&size=..
