@@ -57,7 +57,8 @@ h1 { margin: 0; font-size: 1.25rem; letter-spacing: -0.01em; } /* app name */
   padding: 14px 16px 32px; /* inner spacing */
   border-right: 1px solid var(--line); /* line between panel and map */
 }
-#map { flex: 1; min-width: 0; background: #0f1426; } /* map takes all remaining space; dark while tiles load */
+.map-wrap { flex: 1; min-width: 0; position: relative; } /* map area takes all remaining space; chat floats inside it */
+#map { position: absolute; inset: 0; background: #0f1426; } /* map fills its area; dark while tiles load */
 
 /* ---------- Form controls ---------- */
 .search-row { display: flex; gap: 8px; } /* text box and button side by side */
@@ -73,14 +74,14 @@ input, select, button { /* shared look for all form controls */
 input:focus, select:focus, button:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; } /* blue focus ring */
 
 button { cursor: pointer; } /* hand cursor on every button */
-#search-btn { /* main blue button */
+#search-btn, .ai-btn, #chat-send { /* main blue buttons */
   padding: 0 18px; /* horizontal padding */
   background: var(--accent); /* blue background */
   border-color: var(--accent); /* blue border */
   color: #fff; /* white text */
   font-weight: 600; /* semi-bold */
 }
-#search-btn:hover { filter: brightness(1.1); } /* slightly brighter when hovered */
+#search-btn:hover, .ai-btn:hover, #chat-send:hover { filter: brightness(1.1); } /* slightly brighter when hovered */
 button:disabled { opacity: 0.6; cursor: wait; } /* faded while busy */
 
 #suggestions { /* list of other matching places */
@@ -210,6 +211,62 @@ h2 { font-size: 0.95rem; margin: 22px 0 8px; } /* section headings */
 .water td { padding: 4px 0; border-bottom: 1px solid var(--line); } /* rows */
 .water td:last-child { text-align: right; font-variant-numeric: tabular-nums; } /* numbers right-aligned */
 
+/* ---------- Claude vision check ---------- */
+.ai-btn { width: 100%; padding: 10px; margin-top: 4px; } /* full-width button */
+#vision-status { margin: 8px 0 0; } /* progress line */
+#vision-status.error { color: var(--error); } /* red when it failed */
+.vision-card { /* one checked spot */
+  display: grid; grid-template-columns: 112px 1fr; gap: 10px;
+  margin-top: 8px; padding: 8px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; cursor: pointer;
+}
+.vision-card:hover { border-color: var(--accent); } /* clickable */
+.vision-card img { width: 112px; height: 112px; object-fit: cover; border-radius: 6px; } /* the photo Claude looked at */
+.vision-card p { margin: 3px 0 0; font-size: 0.8rem; color: var(--muted); } /* explanation */
+.badge { display: inline-block; padding: 0 8px; border-radius: 999px; font-size: 0.75rem; font-weight: 700; } /* verdict pill */
+.badge.good { background: rgba(12, 163, 12, 0.18); color: #4fd14f; } /* looks suitable */
+.badge.caution { background: rgba(250, 178, 25, 0.16); color: var(--warning); } /* check on site */
+.badge.poor { background: rgba(208, 59, 59, 0.18); color: #ff7b7b; } /* not suitable */
+.facts { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; } /* small fact chips */
+.facts span { padding: 0 6px; border: 1px solid var(--line); border-radius: 6px; font-size: 0.72rem; color: var(--muted); } /* one fact */
+
+/* ---------- Chat (floats over the map) ---------- */
+.chat { /* the chat window */
+  position: absolute; left: 12px; bottom: 28px; z-index: 1000; /* above the map, below nothing */
+  width: min(390px, calc(100% - 24px)); max-height: calc(100% - 110px);
+  display: flex; flex-direction: column;
+  background: rgba(11, 16, 32, 0.95); border: 1px solid var(--line); border-radius: 14px;
+  box-shadow: 0 6px 28px rgba(0, 0, 0, 0.5);
+}
+.chat-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--line); } /* title bar */
+.chat-head span { display: block; } /* subtitle under the title */
+#chat-close { width: 28px; height: 28px; padding: 0; background: var(--panel); } /* minimise button */
+.chat-log { flex: 1; min-height: 80px; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 8px; } /* messages scroll */
+.msg { max-width: 88%; padding: 8px 10px; border-radius: 12px; white-space: pre-wrap; line-height: 1.45; } /* one message */
+.msg.user { align-self: flex-end; background: var(--accent); color: #fff; border-bottom-right-radius: 4px; } /* your question */
+.msg.ai { align-self: flex-start; background: var(--panel-2); border: 1px solid var(--line); border-bottom-left-radius: 4px; } /* Claude's answer */
+.msg.note { align-self: center; max-width: 100%; color: var(--muted); font-size: 0.78rem; text-align: center; padding: 2px; } /* system notes */
+.msg.error { align-self: flex-start; color: var(--error); background: rgba(255, 107, 107, 0.08); border: 1px solid rgba(255, 107, 107, 0.4); } /* failures */
+.msg.typing { color: var(--muted); font-style: italic; } /* "thinking…" */
+.hl-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; white-space: normal; } /* highlight buttons under an answer */
+.hl-chip { padding: 1px 8px; border-radius: 999px; font-size: 0.75rem; background: var(--panel); } /* one highlight */
+.hl-chip i { display: inline-block; width: 8px; height: 8px; margin-right: 5px; border-radius: 2px; } /* its colour */
+.chat-suggest { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 10px 6px; } /* suggested questions */
+.chat-suggest button { padding: 2px 9px; border-radius: 999px; font-size: 0.75rem; background: var(--panel-2); } /* one suggestion */
+.chat-suggest button:hover { border-color: var(--accent); }
+.chat-form { display: flex; gap: 6px; padding: 8px 10px 10px; border-top: 1px solid var(--line); } /* input row */
+#chat-input { flex: 1; min-width: 0; padding: 8px 10px; } /* question box */
+#chat-send { padding: 0 14px; } /* send button */
+.chat-open { /* folded chat button */
+  position: absolute; left: 12px; bottom: 28px; z-index: 1000;
+  padding: 10px 16px; border-radius: 999px; background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.5);
+}
+.hl-label { /* label drawn on the map next to a highlight */
+  padding: 2px 8px; border-radius: 6px; font-size: 0.75rem; font-weight: 700; white-space: nowrap;
+  background: rgba(11, 16, 32, 0.9); color: #fff; border: 2px solid #fff; transform: translate(-50%, -100%);
+  display: inline-block;
+}
+
 .about { margin-top: 16px; color: var(--muted); font-size: 0.8rem; } /* folded sources box */
 .about summary { cursor: pointer; } /* clickable heading */
 .about ul { padding-left: 18px; } /* indented lists */
@@ -234,7 +291,9 @@ h2 { font-size: 0.95rem; margin: 22px 0 8px; } /* section headings */
 
 @media (max-width: 800px) { /* phones and small tablets: map on top, panel below */
   .layout { flex-direction: column; } /* stack instead of side by side */
-  #map { flex: none; height: 55vh; order: -1; } /* map first, fixed height */
+  .map-wrap { flex: none; height: 62vh; order: -1; } /* map first, fixed height */
+  .chat { left: 8px; right: 8px; width: auto; bottom: 20px; max-height: 60%; } /* chat spans the map width */
+  .chat-open { left: 8px; bottom: 20px; } /* folded chat button */
   .panel { width: 100%; border-right: 0; overflow: visible; } /* panel full width, page scrolls */
   body { height: auto; } /* let the page grow */
   .tiles { grid-template-columns: repeat(2, 1fr); } /* 2 tiles per row */

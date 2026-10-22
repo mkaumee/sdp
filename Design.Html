@@ -87,6 +87,9 @@
 
         <h2 id="spots-title">Best spots to build</h2> <!-- top cells from the grid -->
         <ol id="spots" class="clicklist"></ol>
+        <button type="button" id="vision-btn" class="ai-btn">🔍 Check these spots with Claude vision</button> <!-- Claude Opus looks at photos -->
+        <p id="vision-status" class="muted small" hidden></p> <!-- progress / error line -->
+        <div id="vision" class="vision"></div> <!-- one card per checked spot -->
 
         <h2 id="hot-title">Heat hotspots to green</h2> <!-- township only -->
         <ol id="hotspots" class="clicklist"></ol>
@@ -103,7 +106,23 @@
       </section>
     </aside>
 
-    <main id="map" aria-label="Map — click to analyse a location"></main> <!-- the interactive map -->
+    <main class="map-wrap"> <!-- map plus the chat floating over it -->
+      <div id="map" aria-label="Map — click to analyse a location"></div> <!-- the interactive map -->
+
+      <section id="chat" class="chat" aria-label="Chat with ClimateSmart AI" hidden> <!-- Claude Haiku chat -->
+        <header class="chat-head">
+          <div><b>💬 Ask ClimateSmart AI</b><span class="muted small">Claude Haiku · can highlight the map</span></div>
+          <button type="button" id="chat-close" aria-label="Minimise chat">–</button> <!-- fold the chat away -->
+        </header>
+        <div id="chat-log" class="chat-log" aria-live="polite"></div> <!-- the conversation -->
+        <div id="chat-suggest" class="chat-suggest"></div> <!-- suggested questions -->
+        <form id="chat-form" class="chat-form" autocomplete="off"> <!-- type a question -->
+          <input id="chat-input" type="text" maxlength="1000" placeholder="Ask about this area…" aria-label="Your question">
+          <button type="submit" id="chat-send">Send</button>
+        </form>
+      </section>
+      <button type="button" id="chat-open" class="chat-open" hidden>💬 Ask ClimateSmart AI</button> <!-- shown when the chat is folded -->
+    </main>
   </div>
 
   <script src="vendor/leaflet/leaflet.js"></script> <!-- the map library -->

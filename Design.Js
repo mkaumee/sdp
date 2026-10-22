@@ -3,6 +3,8 @@
 
 const API_SEARCH = "/api/search"; // backend address that turns a place name into coordinates
 const API_ANALYZE = "/api/analyze"; // backend address that scores an area from satellite data
+const API_VISION = "/api/vision-check"; // backend address where Claude looks at photos of the best spots
+const API_CHAT = "/api/chat"; // backend address for the Claude chat guide
 
 const $ = (id) => document.getElementById(id); // shortcut for document.getElementById
 
@@ -15,6 +17,16 @@ const scaleInput = $("scale"); // MW or new residents
 const scaleLabel = $("scale-label"); // label above that box
 const areaSelect = $("area"); // how wide an area to analyse
 const results = $("results"); // the whole results section
+const visionBtn = $("vision-btn"); // "Check these spots with Claude vision"
+const visionStatus = $("vision-status"); // progress / error line for the vision check
+const visionBox = $("vision"); // vision results
+const chatBox = $("chat"); // the chat window over the map
+const chatLog = $("chat-log"); // the conversation
+const chatSuggest = $("chat-suggest"); // suggested questions
+const chatForm = $("chat-form"); // question form
+const chatInput = $("chat-input"); // question box
+const chatSend = $("chat-send"); // Send button
+const chatOpenBtn = $("chat-open"); // round button shown when the chat is folded
 
 const SCALE = { // settings for the size box, per purpose
   datacentre: { label: "IT load (MW)", min: 1, max: 500, step: 1, value: 30 },
@@ -32,6 +44,9 @@ const state = { // what the page currently shows
   requestId: 0, // increases on every analysis, so late replies from older requests are ignored
   cellLayers: { suitability: {}, heat: {} }, // map rectangles by "row,col", so lists can open their popups
   spotMarkers: [], // numbered best-spot pins
+  chat: [], // conversation with Claude about the current analysis
+  chatBusy: false, // waiting for an answer
+  chatOpened: false, // the chat opens by itself only after the first analysis
 };
 
 function toISODate(d) { // turns a Date object into "YYYY-MM-DD" text
@@ -75,6 +90,7 @@ const overlays = { // layers drawn on top, filled after each analysis
   suitability: L.layerGroup(), // grid coloured by score
   heat: L.layerGroup(), // grid coloured by heat risk
   spots: L.layerGroup(), // numbered best spots
+  ai: L.layerGroup(), // areas the chat guide highlighted
 };
 const outline = L.layerGroup().addTo(map); // the analysed square and the chosen point (always shown)
 L.control.layers(baseLayers, { // the layer switcher in the top-right corner
@@ -82,8 +98,9 @@ L.control.layers(baseLayers, { // the layer switcher in the top-right corner
   "Suitability grid": overlays.suitability,
   "Heat hotspots grid": overlays.heat,
   "Best spots": overlays.spots,
+  "AI highlights": overlays.ai,
 }).addTo(map);
-L.control.scale({ imperial: false }).addTo(map); // km scale bar
+L.control.scale({ imperial: false, position: "bottomright" }).addTo(map); // km scale bar (bottom-left is used by the chat)
 
 // Colours: suitability uses a diverging red–grey–blue scale (bad ↔ good, grey = middle);
 // heat uses one orange hue, light → dark. Neither relies on red vs green.
@@ -165,6 +182,178 @@ async function analyse(point) { // scores the chosen place and shows the result
   }
 }
 
+function postJSON(url, body) { // POST JSON and return the reply, throwing the backend's error message
+  return fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+    .then(async (res) => {
+      const data = await res.json().catch(() => ({})); // an empty object if the reply isn't JSON
+      if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+      return data;
+    });
+}
+
+// ---------- Claude vision check of the best spots ----------
+
+const VISION_BADGES = { "looks suitable": ["good", "✓"], "check on site": ["caution", "!"], "not suitable": ["poor", "✕"] }; // verdict -> style + icon
+
+async function checkSpotsWithVision() { // Claude Opus looks at satellite photos of the best spots
+  const id = state.requestId; // the analysis this check belongs to
+  visionBtn.disabled = true; // prevent double clicks
+  visionStatus.hidden = false;
+  visionStatus.classList.remove("error");
+  visionStatus.textContent = `Claude is looking at satellite photos of ${state.result.candidates.length} spots… (about 20–40 s)`;
+  try {
+    const data = await postJSON(API_VISION, settings()); // the backend reuses its cached analysis
+    if (id !== state.requestId) return; // a new analysis started meanwhile
+    renderVision(data);
+    visionStatus.textContent = `Checked by ${data.model}. The chat knows these findings too.`;
+    addNote("Vision check done — ask me what Claude saw at the spots.");
+  } catch (err) {
+    if (id !== state.requestId) return;
+    visionStatus.classList.add("error"); // red text
+    visionStatus.textContent = err.message; // e.g. "set ANTHROPIC_API_KEY"
+  } finally {
+    visionBtn.disabled = false; // allow another try
+  }
+}
+
+function renderVision(data) { // one card per checked spot: photo, verdict and findings
+  visionBox.innerHTML = "";
+  for (const s of data.spots) {
+    const [level, icon] = VISION_BADGES[s.verdict] || ["caution", "!"];
+    const facts = [
+      `Plantation: ${s.plantation}`,
+      `Natural forest: ${s.natural_forest}`,
+      s.agrees_with_data ? "✓ matches the data" : "✕ differs from the data",
+      ...s.infrastructure,
+      ...s.concerns.map((c) => `⚠ ${c}`),
+    ];
+    const card = document.createElement("div");
+    card.className = "vision-card";
+    card.innerHTML =
+      `<img src="${s.photo}" alt="Satellite photo of spot ${s.rank}; the yellow box is the candidate area">` +
+      `<div><b>Spot ${s.rank}</b> <span class="badge ${level}">${icon} ${esc(s.verdict)}</span>` +
+      `<p>${esc(s.what_i_see)}</p><p>${esc(s.explanation)}</p>` +
+      `<div class="facts">${facts.map((f) => `<span>${esc(f)}</span>`).join("")}</div></div>`;
+    card.addEventListener("click", () => map.flyToBounds(s.bounds, { padding: [60, 60], maxZoom: 16 })); // zoom to the spot
+    visionBox.appendChild(card);
+  }
+}
+
+// ---------- Claude chat guide with map highlights ----------
+
+const TONE_COLORS = { good: "#2a78d6", warning: "#fab219", bad: "#d03b3b", info: "#ffffff" }; // highlight outline colours
+const SUGGESTIONS = { // starter questions per purpose
+  datacentre: ["Explain this result", "Which spot is best and why?", "Is there enough water?", "Where is the flood risk?"],
+  township: ["Explain this result", "Where should we plant trees first?", "Which areas are hottest?", "Where is the flood risk?"],
+};
+
+function richText(text) { // safe text where **bold** becomes bold
+  return esc(text).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+}
+
+function addMessage(kind, html) { // adds a bubble to the chat log
+  const div = document.createElement("div");
+  div.className = `msg ${kind}`;
+  div.innerHTML = html;
+  chatLog.appendChild(div);
+  chatLog.scrollTop = chatLog.scrollHeight; // keep the newest message in view
+  return div;
+}
+
+function addNote(text) { // small grey line in the middle of the chat
+  addMessage("note", esc(text));
+}
+
+function mapPadding() { // keeps zoomed-to areas clear of the chat window
+  if (chatBox.hidden) return { padding: [24, 24] };
+  if (window.innerWidth > 800) return { paddingTopLeft: [chatBox.offsetWidth + 36, 24], paddingBottomRight: [24, 24] }; // chat on the left
+  return { paddingTopLeft: [12, 12], paddingBottomRight: [12, chatBox.offsetHeight + 28] }; // phones: chat along the bottom
+}
+
+function openChat(open) { // show or fold away the chat window
+  chatBox.hidden = !open;
+  chatOpenBtn.hidden = open || !state.result; // the round button only when folded and there's something to ask about
+  if (open) chatInput.focus({ preventScroll: true });
+}
+
+function resetChat(r) { // a new analysis starts a fresh conversation about it
+  state.chat = [];
+  chatLog.innerHTML = "";
+  addNote(`Analysing ${state.placeName || "the selected location"} for a ${r.purpose_label.toLowerCase()}. Ask me anything — I can highlight places on the map.`);
+  chatSuggest.innerHTML = "";
+  for (const q of SUGGESTIONS[r.purpose]) { // one button per starter question
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = q;
+    b.addEventListener("click", () => sendChat(q));
+    chatSuggest.appendChild(b);
+  }
+}
+
+function drawHighlights(highlights, fit = true) { // outlines the cells Claude pointed at, with a label per group
+  overlays.ai.clearLayers(); // only the latest highlights
+  if (!highlights.length) return;
+  const all = L.latLngBounds([]); // area covering every highlight, for zooming
+  for (const h of highlights) {
+    const colour = TONE_COLORS[h.tone] || TONE_COLORS.info;
+    const group = L.latLngBounds([]); // area of this highlight
+    for (const c of h.cells) {
+      L.rectangle(c.bounds, { color: colour, weight: 3, fillColor: colour, fillOpacity: 0.22, bubblingMouseEvents: false })
+        .bindTooltip(esc(h.label)).addTo(overlays.ai);
+      group.extend(c.bounds);
+    }
+    L.marker([group.getNorth(), group.getCenter().lng], { // label above the group
+      interactive: false,
+      icon: L.divIcon({ className: "", iconSize: null, html: `<span class="hl-label" style="border-color:${colour}">${esc(h.label)}</span>` }),
+    }).addTo(overlays.ai);
+    all.extend(group);
+  }
+  map.addLayer(overlays.ai); // make sure the layer is on
+  if (fit) map.flyToBounds(all, { ...mapPadding(), maxZoom: 15 }); // bring the highlights into view, clear of the chat
+}
+
+async function sendChat(text) { // sends a question to Claude Haiku and shows the answer
+  text = text.trim();
+  if (!text || state.chatBusy || !state.result) return; // nothing to send, or still waiting
+  const id = state.requestId; // the analysis this question is about
+  state.chatBusy = true;
+  chatSend.disabled = true;
+  chatInput.value = "";
+  state.chat.push({ role: "user", content: text }); // the conversation so far goes with every question
+  addMessage("user", esc(text));
+  const typing = addMessage("ai typing", "Thinking…");
+  try {
+    const data = await postJSON(API_CHAT, { ...settings(), messages: state.chat });
+    if (id !== state.requestId) return; // the analysis changed while waiting
+    typing.remove();
+    state.chat.push({ role: "assistant", content: data.reply });
+    const bubble = addMessage("ai", richText(data.reply));
+    if (data.highlights.length) {
+      const chips = document.createElement("div"); // one button per highlight, to show it again later
+      chips.className = "hl-chips";
+      for (const h of data.highlights) {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "hl-chip";
+        b.title = "Show on the map";
+        b.innerHTML = `<i style="background:${TONE_COLORS[h.tone] || TONE_COLORS.info}"></i>📍 ${esc(h.label)}`;
+        b.addEventListener("click", () => drawHighlights([h]));
+        chips.appendChild(b);
+      }
+      bubble.appendChild(chips);
+      drawHighlights(data.highlights);
+    }
+  } catch (err) {
+    if (id !== state.requestId) return;
+    typing.remove();
+    state.chat.pop(); // forget the unanswered question so the history stays in turn order
+    addMessage("error", esc(err.message));
+  } finally {
+    state.chatBusy = false;
+    chatSend.disabled = false;
+  }
+}
+
 // ---------- Drawing on the map ----------
 
 function cellPopup(cell, r) { // popup shown when a grid cell is clicked
@@ -227,7 +416,7 @@ function drawResult(r) { // draws the analysis on the map
   map.removeLayer(showHeat ? overlays.suitability : overlays.heat); // and hide the other
   map.addLayer(overlays.spots); // pins on top
   updateLegend(); // match the legend to the visible grid
-  map.fitBounds(r.location.bounds, { padding: [24, 24] }); // zoom to the analysed area
+  map.fitBounds(r.location.bounds, mapPadding()); // zoom to the analysed area, clear of the chat
 }
 
 function focusCell(cell, grid) { // zoom to a cell and open its popup (used by the lists)
@@ -242,6 +431,16 @@ function focusCell(cell, grid) { // zoom to a cell and open its popup (used by t
 
 function showResult(r) { // fills the results panel
   results.hidden = false; // make it visible
+  visionBox.innerHTML = ""; // old vision findings no longer apply
+  visionStatus.hidden = true;
+  visionBtn.hidden = !r.candidates.length; // nothing to check without best spots
+  resetChat(r); // fresh conversation about this analysis
+  if (!state.chatOpened) { // open the chat by itself the first time (phones get the folded button instead)
+    state.chatOpened = true;
+    openChat(window.innerWidth > 800);
+  } else {
+    chatOpenBtn.hidden = !chatBox.hidden; // keep the folded button if the user folded it
+  }
 
   const ring = $("ring-fg"); // the coloured part of the gauge
   const circumference = 2 * Math.PI * 52; // length of the circle (radius 52)
@@ -406,3 +605,10 @@ document.querySelectorAll(".seg button").forEach((b) =>
   }));
 scaleInput.addEventListener("change", () => analyse()); // new size: re-score
 areaSelect.addEventListener("change", () => analyse()); // new area: re-score
+visionBtn.addEventListener("click", checkSpotsWithVision); // Claude vision check on demand
+chatForm.addEventListener("submit", (e) => { // Send clicked or Enter pressed
+  e.preventDefault();
+  sendChat(chatInput.value);
+});
+$("chat-close").addEventListener("click", () => openChat(false)); // fold the chat away
+chatOpenBtn.addEventListener("click", () => openChat(true)); // bring it back
