@@ -1,0 +1,71 @@
+<!DOCTYPE html> <!-- tells the browser this is a modern HTML5 page -->
+<html lang="en"> <!-- start of the page; content is in English -->
+<head> <!-- head = settings and links, not shown on screen -->
+  <meta charset="UTF-8"> <!-- use UTF-8 text so symbols like ° and · display correctly -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"> <!-- make the page fit phone screens -->
+  <title>Satellite Finder</title> <!-- text shown on the browser tab -->
+  <link rel="stylesheet" href="Design.Css"> <!-- load our styles -->
+</head> <!-- end of head -->
+<body> <!-- body = everything visible on the page -->
+  <header> <!-- top section with the title -->
+    <h1>Satellite Finder</h1> <!-- big page title -->
+    <p class="sub">Search any place and see it from orbit — imagery from NASA GIBS</p> <!-- subtitle -->
+  </header> <!-- end of header -->
+
+  <main> <!-- main content area -->
+    <form id="search-form" autocomplete="off"> <!-- the search form; browser autocomplete turned off -->
+      <div class="search-row"> <!-- row holding the text box and button side by side -->
+        <input id="place" type="text" placeholder="Search a place, e.g. Grand Canyon, Tokyo, Mount Everest" required> <!-- where you type the place; "required" blocks empty searches -->
+        <button type="submit" id="search-btn">Search</button> <!-- clicking this submits the form -->
+      </div> <!-- end of search row -->
+
+      <div class="options"> <!-- row of extra settings -->
+        <label>Imagery <!-- label for the imagery dropdown -->
+          <select id="layer"> <!-- dropdown of NASA imagery layers; value = NASA layer name, data-res = metres per pixel -->
+            <option value="HLS_S30_Nadir_BRDF_Adjusted_Reflectance" data-res="30">Sentinel‑2 (HLS, 30 m)</option> <!-- sharp, not daily -->
+            <option value="HLS_L30_Nadir_BRDF_Adjusted_Reflectance" data-res="30">Landsat (HLS, 30 m)</option> <!-- sharp, not daily -->
+            <option value="MODIS_Terra_CorrectedReflectance_TrueColor" data-res="250" selected>MODIS Terra (250 m, daily)</option> <!-- daily, default choice -->
+            <option value="VIIRS_SNPP_CorrectedReflectance_TrueColor" data-res="250">VIIRS SNPP (250 m, daily)</option> <!-- daily -->
+            <option value="BlueMarble_ShadedRelief_Bathymetry" data-res="500" data-static="1">Blue Marble (cloud‑free)</option> <!-- data-static = has no date -->
+          </select> <!-- end of imagery dropdown -->
+        </label> <!-- end of imagery label -->
+        <label>Date <!-- label for the date picker -->
+          <input id="date" type="date"> <!-- calendar picker; Design.Js fills in the default -->
+        </label> <!-- end of date label -->
+        <label>Area width <!-- label for the area size dropdown -->
+          <select id="size"> <!-- how many km wide the image should cover -->
+            <option value="5">5 km</option> <!-- neighbourhood -->
+            <option value="20">20 km</option> <!-- city -->
+            <option value="50">50 km</option> <!-- metro area -->
+            <option value="150" selected>150 km</option> <!-- region (default) -->
+            <option value="500">500 km</option> <!-- small country -->
+            <option value="1500">1500 km</option> <!-- large country -->
+          </select> <!-- end of size dropdown -->
+        </label> <!-- end of size label -->
+      </div> <!-- end of options row -->
+    </form> <!-- end of form -->
+
+    <ul id="suggestions" hidden></ul> <!-- list of other matching places; filled by Design.Js, hidden at first -->
+
+    <p id="status" role="status"></p> <!-- message line; role="status" makes screen readers announce it -->
+
+    <figure id="result" hidden> <!-- image box; hidden until there's a result -->
+      <div class="img-wrap"> <!-- frame around the image -->
+        <img id="sat-img" alt="Satellite image"> <!-- the satellite picture (src set by Design.Js) -->
+        <div id="loader" hidden><span></span></div> <!-- spinner overlay shown while loading -->
+      </div> <!-- end of frame -->
+      <figcaption> <!-- caption under the image -->
+        <strong id="place-name"></strong> <!-- place name -->
+        <span id="meta"></span> <!-- coordinates, layer, date, width -->
+        <a id="open-link" target="_blank" rel="noopener">Open full image</a> <!-- opens the picture in a new tab -->
+      </figcaption> <!-- end of caption -->
+    </figure> <!-- end of image box -->
+  </main> <!-- end of main content -->
+
+  <footer> <!-- bottom credits -->
+    Imagery: NASA EOSDIS GIBS · Geocoding: © OpenStreetMap contributors <!-- data sources must be credited -->
+  </footer> <!-- end of footer -->
+
+  <script src="Design.Js"></script> <!-- load our JavaScript last, after all elements exist -->
+</body> <!-- end of visible content -->
+</html> <!-- end of page -->

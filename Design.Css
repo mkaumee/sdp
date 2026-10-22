@@ -1,0 +1,148 @@
+/* Design.Css — all the styling for Satellite Finder */
+
+:root { /* :root = the whole page; variables defined here can be reused everywhere */
+  --bg: #0b1020; /* page background (very dark blue) */
+  --panel: #141b31; /* background for inputs and boxes */
+  --line: #26304f; /* border colour */
+  --text: #e8ecf8; /* main text colour (near white) */
+  --muted: #94a0c0; /* softer grey-blue text for less important info */
+  --accent: #4f8cff; /* highlight blue for the button and links */
+  --error: #ff6b6b; /* red for error messages */
+}
+
+* { box-sizing: border-box; } /* widths include padding and border, which makes sizing predictable */
+
+[hidden] { display: none !important; } /* anything with the "hidden" attribute is truly hidden, even if a rule below gives it display: grid/flex */
+
+body { /* the whole visible page */
+  margin: 0; /* remove the browser's default gap around the page */
+  min-height: 100vh; /* at least as tall as the window */
+  display: flex; /* flexbox layout... */
+  flex-direction: column; /* ...stacking header, main, footer vertically */
+  background: radial-gradient(ellipse at top, #1a2550 0%, var(--bg) 60%); /* blue glow at the top fading to dark */
+  color: var(--text); /* default text colour */
+  font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; /* 15px text, 1.5 line spacing, system font */
+}
+
+header, main, footer { /* the three main sections */
+  width: 100%; /* full width... */
+  max-width: 900px; /* ...but never wider than 900px */
+  margin: 0 auto; /* centre them horizontally */
+  padding: 0 16px; /* 16px gap on the left and right edges */
+}
+
+header { padding-top: 40px; text-align: center; } /* space above the title, centred text */
+h1 { margin: 0; font-size: 2.2rem; letter-spacing: -0.02em; } /* big title, slightly tighter letters */
+.sub { margin: 6px 0 28px; color: var(--muted); } /* subtitle: small gap above, bigger gap below, grey */
+
+main { flex: 1; position: relative; } /* main grows to push the footer to the bottom */
+
+.search-row { display: flex; gap: 8px; } /* text box and button side by side, 8px apart */
+
+input, select, button { /* shared look for all form controls */
+  font: inherit; /* use the page font instead of the browser default */
+  color: var(--text); /* light text */
+  background: var(--panel); /* dark panel background */
+  border: 1px solid var(--line); /* thin border */
+  border-radius: 10px; /* rounded corners */
+}
+
+#place { flex: 1; min-width: 0; padding: 14px 16px; font-size: 1.05rem; } /* search box fills the spare width, roomy padding */
+input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1px; } /* blue ring on the control you're typing in */
+
+button { /* the Search button */
+  padding: 0 22px; /* horizontal padding */
+  background: var(--accent); /* blue background */
+  border-color: var(--accent); /* blue border */
+  color: #fff; /* white text */
+  font-weight: 600; /* semi-bold text */
+  cursor: pointer; /* hand cursor on hover */
+}
+button:hover { filter: brightness(1.1); } /* slightly brighter when hovered */
+button:disabled { opacity: 0.6; cursor: wait; } /* faded with a waiting cursor while searching */
+
+.options { /* row of extra settings */
+  display: flex; /* side by side */
+  flex-wrap: wrap; /* wrap onto new lines on narrow screens */
+  gap: 12px; /* space between them */
+  margin-top: 12px; /* space above the row */
+}
+.options label { /* each setting with its label */
+  display: flex; /* flexbox... */
+  flex-direction: column; /* ...label text above the control */
+  gap: 4px; /* small gap between label and control */
+  flex: 1 1 160px; /* share the row equally, each at least about 160px */
+  font-size: 0.8rem; /* small label text */
+  color: var(--muted); /* grey label text */
+}
+.options select, .options input { padding: 8px 10px; color-scheme: dark; } /* padding inside; dark-style calendar and dropdown popups */
+
+#suggestions { /* list of other matching places */
+  list-style: none; /* no bullet points */
+  margin: 8px 0 0; /* small gap above */
+  padding: 4px; /* inner spacing */
+  background: var(--panel); /* dark panel background */
+  border: 1px solid var(--line); /* thin border */
+  border-radius: 10px; /* rounded corners */
+}
+#suggestions li { /* each suggestion */
+  padding: 8px 12px; /* inner spacing */
+  border-radius: 6px; /* rounded hover highlight */
+  cursor: pointer; /* hand cursor, since it's clickable */
+}
+#suggestions li:hover { background: var(--line); } /* highlight on hover */
+#suggestions small { display: block; color: var(--muted); } /* full name on its own line, in grey */
+
+#status { min-height: 1.5em; margin: 14px 0; color: var(--muted); } /* message line keeps its height even when empty */
+#status.error { color: var(--error); } /* red when it's an error */
+
+#result { margin: 0 0 32px; } /* image box: remove default figure margins, add space below */
+
+.img-wrap { /* frame around the satellite image */
+  position: relative; /* lets the spinner overlay sit on top of the image */
+  background: #000; /* black while the image loads */
+  border: 1px solid var(--line); /* thin border */
+  border-radius: 12px; /* rounded corners */
+  overflow: hidden; /* clip the image to the rounded corners */
+  min-height: 200px; /* keep some height before the image arrives */
+}
+#sat-img { display: block; width: 100%; height: auto; } /* image fills the frame width, keeping its shape */
+
+#loader { /* dark overlay holding the spinner */
+  position: absolute; /* placed on top of the image... */
+  inset: 0; /* ...covering it edge to edge */
+  display: grid; /* grid layout... */
+  place-items: center; /* ...to centre the spinner */
+  background: rgba(0, 0, 0, 0.5); /* half-transparent black */
+}
+#loader span { /* the spinner circle itself */
+  width: 42px; /* size */
+  height: 42px; /* size */
+  border: 4px solid rgba(255, 255, 255, 0.25); /* faint white ring */
+  border-top-color: #fff; /* one bright segment, which spins */
+  border-radius: 50%; /* make it a circle */
+  animation: spin 0.8s linear infinite; /* rotate forever, once every 0.8s */
+}
+@keyframes spin { to { transform: rotate(360deg); } } /* the "spin" animation: one full turn */
+
+figcaption { /* caption under the image */
+  display: flex; /* items in a row */
+  flex-wrap: wrap; /* wrap on narrow screens */
+  align-items: baseline; /* line up the text baselines */
+  gap: 4px 12px; /* 4px between rows, 12px between items */
+  margin-top: 10px; /* space above */
+}
+#meta { color: var(--muted); font-size: 0.9rem; } /* details in smaller grey text */
+#open-link { margin-left: auto; color: var(--accent); } /* push the link to the right edge, blue */
+
+footer { /* credits at the bottom */
+  padding-block: 20px; /* space above and below */
+  text-align: center; /* centred */
+  font-size: 0.8rem; /* small text */
+  color: var(--muted); /* grey */
+}
+
+@media (max-width: 500px) { /* these rules apply only on screens 500px wide or less (phones) */
+  h1 { font-size: 1.7rem; } /* smaller title */
+  button { padding: 0 14px; } /* narrower button */
+}
