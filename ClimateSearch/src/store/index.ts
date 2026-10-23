@@ -21,7 +21,9 @@ import { api } from '@/services/api';
 import { setDisplayUnits } from '@/lib/utils';
 
 // Area analysed when the app first opens: Shah Alam (Selangor, Malaysia), around the City of Elmina townships.
-export const DEFAULT_AREA: AreaSelection = { lat: 3.1885, lng: 101.493, widthKm: 10 };
+export const DEFAULT_AREA: AreaSelection = {
+  lat: 3.1885, lng: 101.493, widthKm: 10, name: 'Shah Alam', location: 'City of Elmina, Shah Alam, Selangor, Malaysia',
+};
 
 let inflight: AbortController | null = null;  // the area request in progress (a newer one cancels it)
 
