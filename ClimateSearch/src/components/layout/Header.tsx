@@ -5,10 +5,18 @@ import {
   Bell, HelpCircle, User, Search, X, Sparkles,
   MapPin, Flame, Sprout, FileText
 } from 'lucide-react';
+import toast from 'react-hot-toast';
 import { ThemeToggle } from '@/components/ui/ThemeToggle';
 import { useAppStore } from '@/store';
-import { formatTimestamp } from '@/lib/utils';
-import { demoZones, demoHotspots, demoGreeningCandidates } from '@/data/demo';
+import { api, type PlaceResult } from '@/services/api';
+import { formatTemp, formatTimestamp } from '@/lib/utils';
+import type { ClimateZone, GreeningCandidate, Hotspot } from '@/types';
+
+type SearchHit =
+  | { type: 'zone'; item: ClimateZone; title: string; subtitle: string }
+  | { type: 'hotspot'; item: Hotspot; title: string; subtitle: string }
+  | { type: 'greening'; item: GreeningCandidate; title: string; subtitle: string }
+  | { type: 'place'; item: PlaceResult; title: string; subtitle: string };
 
 const TOP_PILLS = [
   { to: '/overview', label: 'Overview' },
@@ -25,12 +33,14 @@ export function Header({ title }: HeaderProps) {
   const {
     notifications, markNotificationRead, markAllNotificationsRead,
     chatVisible, toggleChat,
-    setSelectedZone, setSelectedHotspot, setSelectedCandidate, setMapView
+    setSelectedZone, setSelectedHotspot, setSelectedCandidate, setMapView,
+    areaData, area, setArea,
   } = useAppStore();
 
   const [notifOpen, setNotifOpen] = useState(false);
   const [searchVal, setSearchVal] = useState('');
   const [searchFocused, setSearchFocused] = useState(false);
+  const [places, setPlaces] = useState<PlaceResult[]>([]);
   const notifRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
@@ -51,34 +61,55 @@ export function Header({ title }: HeaderProps) {
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
-  // Search filtered results
-  const matchingResults = searchVal.trim()
+  // Places anywhere (OpenStreetMap), looked up after a short pause in typing
+  useEffect(() => {
+    const q = searchVal.trim();
+    if (q.length < 3) {
+      setPlaces([]);
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      api.searchPlaces(q).then(found => !cancelled && setPlaces(found.slice(0, 3))).catch(() => !cancelled && setPlaces([]));
+    }, 400);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [searchVal]);
+
+  // Search filtered results: things in the analysed area first, then places to analyse
+  const q = searchVal.trim().toLowerCase();
+  const matchingResults: SearchHit[] = q
     ? [
-        ...demoZones
-          .filter(z => z.name.toLowerCase().includes(searchVal.toLowerCase()))
-          .map(z => ({ type: 'zone', item: z, title: z.name, subtitle: `Zone • ${z.location}` })),
-        ...demoHotspots
-          .filter(h => h.name.toLowerCase().includes(searchVal.toLowerCase()))
-          .map(h => ({ type: 'hotspot', item: h, title: h.name, subtitle: `Hotspot • ${h.surfaceTemp}°C` })),
-        ...demoGreeningCandidates
-          .filter(g => g.name.toLowerCase().includes(searchVal.toLowerCase()))
-          .map(g => ({ type: 'greening', item: g, title: g.name, subtitle: `Greening • ${g.candidateArea} ha` })),
-      ].slice(0, 5)
+        ...[
+          ...(areaData?.zones ?? [])
+            .filter(z => z.name.toLowerCase().includes(q))
+            .map(z => ({ type: 'zone' as const, item: z, title: z.name, subtitle: `Zone • ${z.location}` })),
+          ...(areaData?.hotspots ?? [])
+            .filter(h => h.name.toLowerCase().includes(q))
+            .map(h => ({ type: 'hotspot' as const, item: h, title: h.name, subtitle: `Hotspot • ${formatTemp(h.surfaceTemp)}` })),
+          ...(areaData?.greeningCandidates ?? [])
+            .filter(g => g.name.toLowerCase().includes(q))
+            .map(g => ({ type: 'greening' as const, item: g, title: g.name, subtitle: `Greening • ${g.candidateArea} ha` })),
+        ].slice(0, 4),
+        ...places.map(p => ({ type: 'place' as const, item: p, title: p.name, subtitle: `Analyse place • ${p.detail}` })),
+      ]
     : [];
 
-  const handleSelectSearchItem = (res: typeof matchingResults[0]) => {
+  const handleSelectSearchItem = (res: SearchHit) => {
     setSearchVal('');
     setSearchFocused(false);
     if (res.type === 'zone') {
-      setSelectedZone(res.item as any);
-      setMapView((res.item as any).coordinates, 14);
+      setSelectedZone(res.item);
+      setMapView(res.item.coordinates, 14);
       navigate('/map-explorer');
     } else if (res.type === 'hotspot') {
-      setSelectedHotspot(res.item as any);
+      setSelectedHotspot(res.item);
       navigate('/hotspots');
     } else if (res.type === 'greening') {
-      setSelectedCandidate(res.item as any);
+      setSelectedCandidate(res.item);
       navigate('/greening');
+    } else {
+      setArea({ lat: res.item.lat, lng: res.item.lon, widthKm: area.widthKm, name: res.item.name, location: res.item.detail });
+      toast(`Analysing ${res.item.name}…`, { icon: '🛰️' });
     }
   };
 
@@ -125,7 +156,8 @@ export function Header({ title }: HeaderProps) {
               value={searchVal}
               onChange={e => setSearchVal(e.target.value)}
               onFocus={() => setSearchFocused(true)}
-              placeholder="Search platform…"
+              onKeyDown={e => e.key === 'Enter' && matchingResults[0] && handleSelectSearchItem(matchingResults[0])}
+              placeholder="Search zones or places…"
               className="bg-transparent text-xs w-full outline-none text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
             />
             {searchVal && (
@@ -153,6 +185,7 @@ export function Header({ title }: HeaderProps) {
                       {r.type === 'zone' && <MapPin size={13} />}
                       {r.type === 'hotspot' && <Flame size={13} className="text-red-400" />}
                       {r.type === 'greening' && <Sprout size={13} className="text-lime-400" />}
+                      {r.type === 'place' && <Search size={13} />}
                     </div>
                     <div>
                       <p className="text-xs font-bold text-[var(--text-primary)]">{r.title}</p>
@@ -215,6 +248,9 @@ export function Header({ title }: HeaderProps) {
                   )}
                 </div>
                 <div className="max-h-72 overflow-y-auto divide-y divide-[var(--border)] text-xs">
+                  {notifications.length === 0 && (
+                    <p className="p-4 text-center text-[var(--text-muted)]">No notifications yet — they arrive with each area analysis.</p>
+                  )}
                   {notifications.map(n => (
                     <div
                       key={n.id}
