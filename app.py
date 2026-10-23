@@ -1,13 +1,18 @@
 # app.py — Backend server for ClimateSmart AI (grew out of Satellite Finder).
-# It does five jobs:
-#   1. /api/search       -> turns a place name into coordinates (geocoding).
-#   2. /api/analyze      -> scores an area for a data centre or township using satellite data (see analysis.py).
-#   3. /api/vision-check -> Claude Opus looks at satellite photos of the best spots (optional, needs an API key).
-#   4. /api/chat         -> Claude Haiku answers questions and highlights areas on the map (optional, same key).
-#   5. /api/image        -> downloads a NASA GIBS satellite picture of an area.
-# It also serves the front-end files (Design.Html, Design.Css, Design.Js and the Leaflet map library).
+# The ClimateSearch dashboard (React, in ClimateSearch/) uses:
+#   /api/search          -> turns a place name into coordinates (geocoding).
+#   /api/area            -> urban heat and greening analysis of an area (see urban.py).
+#   /api/reports         -> builds a report from that analysis (see reports.py).
+#   /api/assistant       -> the chat assistant, with real satellite photos (see assistant.py).
+# The classic site finder page (/site-finder: Design.Html, Design.Css, Design.Js) uses:
+#   /api/analyze         -> scores an area for a data centre or township using satellite data (see analysis.py).
+#   /api/vision-check    -> Claude Opus looks at satellite photos of the best spots (optional, needs an API key).
+#   /api/chat            -> Claude Haiku answers questions and highlights areas on the map (optional, same key).
+#   /api/image           -> downloads a NASA GIBS satellite picture of an area.
 #
-# Run it with:   pip install -r requirements.txt   then   python app.py
+# Run it with:   pip install -r requirements.txt
+#                cd ClimateSearch && npm install && npm run build && cd ..    (builds the dashboard once)
+#                python app.py
 # Then open:     http://127.0.0.1:5000
 
 import os  # os lets us build file paths that work on any operating system
@@ -19,7 +24,10 @@ from flask import Flask, Response, abort, jsonify, request, send_from_directory 
 
 import ai  # Claude vision check and chat
 import analysis  # scoring and recommendations
+import assistant  # the dashboard's chat assistant
 import datasources  # satellite data readers
+import reports  # the dashboard's reports
+import urban  # urban heat and greening analysis
 from datasources import bounding_box  # square area around a point, in degrees
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))  # the folder this file lives in
@@ -27,6 +35,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))  # the folder this file li
 # NASA GIBS (Global Imagery Browse Services) WMS endpoint — NASA's satellite imagery API, no key needed.
 NASA_GIBS_WMS = "https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi"
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"  # main place-name search service (OpenStreetMap)
+NOMINATIM_REVERSE_URL = "https://nominatim.openstreetmap.org/reverse"  # coordinates -> place name
 OPEN_METEO_URL = "https://geocoding-api.open-meteo.com/v1/search"  # backup place-name search service
 
 # OpenStreetMap asks every app to identify itself with a User-Agent header.
@@ -47,6 +56,9 @@ MIN_PX = 512  # smallest image size so small areas still look decent
 TIMEOUT = 30  # seconds to wait for an outside API before giving up
 
 AREA_KM = (1, 30)  # smallest and largest area width the analysis accepts
+DASHBOARD_KM = (2, 20)  # smallest and largest area width the dashboard's heat analysis accepts
+UI_DIST = os.path.join(BASE_DIR, "ClimateSearch", "dist")  # the built React dashboard (npm run build)
+UI_ROUTES = {"overview", "map-explorer", "hotspots", "greening", "reports", "settings"}  # the dashboard's pages
 SIZE_LIMITS = {"datacentre": (1, 500), "township": (100, 1_000_000)}  # MW, or new residents
 
 # Only these files may be downloaded by the browser, with the correct content type for each.
@@ -66,16 +78,38 @@ FRONTEND_FILES = {
 app = Flask(__name__)  # create the web server application
 
 
+NOT_BUILT_PAGE = """<!doctype html><meta charset="utf-8"><title>ClimateSmart AI</title>
+<body style="font:16px system-ui;background:#07111F;color:#F1F5F9;padding:40px;max-width:640px;margin:auto">
+<h1>ClimateSmart AI</h1><p>The dashboard hasn't been built yet. In a terminal, run:</p>
+<pre style="background:#122238;padding:12px;border-radius:8px">cd ClimateSearch
+npm install
+npm run build</pre><p>then reload this page. Meanwhile the classic site finder is at
+<a style="color:#B7E65C" href="/site-finder">/site-finder</a>.</p></body>"""
+
+
 @app.route("/")  # when someone visits the home page...
 def index():
-    return serve_frontend("Design.Html")  # ...send them the HTML page
+    if os.path.exists(os.path.join(UI_DIST, "index.html")):  # the React dashboard has been built
+        return send_from_directory(UI_DIST, "index.html")  # ...send it
+    return NOT_BUILT_PAGE  # ...otherwise explain how to build it
 
 
-@app.route("/<path:filename>")  # any other file request, e.g. /Design.Css
+@app.route("/site-finder")  # the classic data centre / township site finder
+def site_finder():
+    return send_from_directory(BASE_DIR, "Design.Html", mimetype="text/html")
+
+
+@app.route("/<path:filename>")  # any other file request, e.g. /Design.Css or /assets/index.js
 def serve_frontend(filename):
-    if filename not in FRONTEND_FILES:  # refuse anything not on the allow-list (e.g. app.py itself)
-        abort(404)  # reply "not found"
-    return send_from_directory(BASE_DIR, filename, mimetype=FRONTEND_FILES[filename])  # send the file
+    if filename in FRONTEND_FILES:  # the classic site finder's files (allow-list; never e.g. app.py)
+        return send_from_directory(BASE_DIR, filename, mimetype=FRONTEND_FILES[filename])
+    if filename.startswith("api/"):  # an API address that doesn't exist
+        abort(404)
+    if filename.split("/")[0] in UI_ROUTES:  # a dashboard page like /hotspots: the React app handles it
+        return index()
+    if os.path.isdir(UI_DIST):  # a file of the built dashboard (send_from_directory refuses paths outside it)
+        return send_from_directory(UI_DIST, filename)
+    abort(404)  # reply "not found"
 
 
 def geocode_nominatim(query):
@@ -198,6 +232,111 @@ def chat():
     try:
         result = cached_analysis(*settings)  # the analysis the user is looking at
         return jsonify(ai.chat(result, body.get("messages"), VISION_RESULTS.get(settings)))  # Claude Haiku answers
+    except datasources.DataUnavailable:
+        return jsonify(error="Satellite data service unavailable"), 502
+    except ai.AIError as err:
+        return jsonify(error=str(err)), err.status
+
+
+def read_area_args(args, date_range=None):
+    """Check the area settings sent by the dashboard. Returns (settings dict, error message)."""
+    try:
+        lat = float(args["lat"])  # centre of the area
+        lon = float(args["lon"])
+        width = float(args.get("width", 10))  # area width in km
+    except (KeyError, TypeError, ValueError):
+        return None, "lat, lon and width must be numbers"
+    if not (-60 <= lat <= 72 and -180 <= lon <= 180):  # population data only covers 56°S to 71°N
+        return None, "Pick a place between 60°S and 72°N"
+    if not (DASHBOARD_KM[0] <= width <= DASHBOARD_KM[1]):
+        return None, f"Area width must be {DASHBOARD_KM[0]}-{DASHBOARD_KM[1]} km"
+    rng = date_range or {"start": args.get("start"), "end": args.get("end")}
+    try:
+        start = date.fromisoformat(rng["start"]) if rng.get("start") else None  # optional satellite search window
+        end = date.fromisoformat(rng["end"]) if rng.get("end") else None
+    except (TypeError, ValueError):
+        return None, "Dates must be YYYY-MM-DD"
+    if start and end and start > end:
+        return None, "The start date must be before the end date"
+    if end and end > date.today():
+        end = date.today()  # no imagery from the future
+    text = lambda key, n: (str(args.get(key) or "").strip()[:n] or None)  # optional, length-limited text
+    return {"lat": round(lat, 4), "lon": round(lon, 4), "width": width, "name": text("name", 120),
+            "location": text("location", 200), "start": start, "end": end}, None
+
+
+@lru_cache(maxsize=64)  # each place is looked up once
+def reverse_geocode(lat, lon):
+    """(short name, full location) for coordinates from OpenStreetMap, or (None, None) if it can't be reached."""
+    try:
+        res = requests.get(NOMINATIM_REVERSE_URL, params={"lat": lat, "lon": lon, "format": "jsonv2", "zoom": 14},
+                           headers={**HEADERS, "Accept-Language": "en"}, timeout=8)
+        res.raise_for_status()
+        place = res.json()
+    except (requests.RequestException, ValueError):
+        return None, None
+    addr = place.get("address", {})
+    name = next((addr[k] for k in ("suburb", "city_district", "town", "city", "village", "county") if addr.get(k)),
+                (place.get("display_name") or "").split(",")[0] or None)
+    parts = [name, addr.get("city") or addr.get("state"), addr.get("country")]
+    return name, ", ".join(dict.fromkeys(p for p in parts if p)) or None
+
+
+@lru_cache(maxsize=16)  # keep the last 16 areas in memory
+def cached_area(lat, lon, width, name, location, start, end):
+    """Run (or reuse) an area analysis. The result must not be modified by callers."""
+    return urban.analyse_area(lat, lon, width, name, location, start, end)
+
+
+def area_for(settings):
+    """The analysis for validated settings, naming the place first if the dashboard didn't."""
+    if not settings["name"]:
+        settings["name"], found = reverse_geocode(settings["lat"], settings["lon"])
+        settings["location"] = settings["location"] or found
+    return cached_area(**settings)
+
+
+@app.route("/api/area")  # dashboard calls /api/area?lat=..&lon=..&width=10&name=..&location=..
+def area():
+    settings, error = read_area_args(request.args)
+    if error:
+        return jsonify(error=error), 400
+    try:
+        return jsonify(area_for(settings))
+    except datasources.DataUnavailable as err:
+        app.logger.warning("Area analysis failed: %s", err)
+        return jsonify(error="Satellite data service unavailable. Check your internet connection and try again."), 502
+
+
+@app.route("/api/reports", methods=["POST"])  # dashboard posts the report wizard's choices
+def create_report():
+    body = request.get_json(silent=True) or {}
+    if body.get("template") not in reports.TEMPLATE_TITLES:
+        return jsonify(error="Unknown report template"), 400
+    rng = body.get("dateRange") if isinstance(body.get("dateRange"), dict) else None
+    settings, error = read_area_args(body, rng or {})
+    if error:
+        return jsonify(error=error), 400
+    zones = [z for z in body.get("zones") or [] if isinstance(z, str)][:20]
+    metrics = [m for m in body.get("metrics") or [] if isinstance(m, str)][:20]
+    try:
+        data = area_for(settings)  # imagery limited to the report's date range
+    except datasources.DataUnavailable:
+        return jsonify(error="Satellite data service unavailable"), 502
+    title_place = str(body.get("reportLocation") or "").strip()[:120] or None
+    return jsonify(reports.build_report(data, body["template"], zones, rng, metrics, location=title_place))
+
+
+@app.route("/api/assistant", methods=["POST"])  # dashboard posts the area, the conversation and what's selected
+def ask_assistant():
+    body = request.get_json(silent=True) or {}
+    settings, error = read_area_args(body)
+    if error:
+        return jsonify(error=error), 400
+    context = body.get("context") if isinstance(body.get("context"), dict) else {}
+    try:
+        data = area_for(settings)
+        return jsonify(assistant.ask(data, body.get("messages"), context, str(body.get("style") or "scientific")))
     except datasources.DataUnavailable:
         return jsonify(error="Satellite data service unavailable"), 502
     except ai.AIError as err:
