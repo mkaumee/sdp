@@ -21,9 +21,9 @@ export interface ClimateZone {
   name: string;
   location: string;
   coordinates: LatLng;
-  surfaceTemp: number;  // °C
+  surfaceTemp: number | null;  // °C (null when no temperature source was reachable)
   vegetationCoverage: number;  // 0-100%
-  ndvi: number;  // -1 to 1
+  ndvi: number | null;  // -1 to 1 (null without Sentinel-2)
   severity: Severity;
   priorityScore: number;  // 0-100
   lastUpdated: string;  // ISO date
@@ -39,7 +39,7 @@ export interface Hotspot {
   name: string;
   location: string;
   coordinates: LatLng;
-  surfaceTemp: number;
+  surfaceTemp: number | null;
   vegetationCoverage: number;
   severity: Severity;
   priorityScore: number;
@@ -60,7 +60,7 @@ export interface GreeningCandidate {
   location: string;
   coordinates: LatLng;
   currentVegetation: number;  // 0-100%
-  surfaceTemp: number;
+  surfaceTemp: number | null;
   priorityScore: number;
   severity: Severity;
   candidateArea: number;  // hectares

@@ -1,7 +1,7 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  MapContainer, TileLayer, CircleMarker, Popup, useMap
+  MapContainer, CircleMarker, Popup, Rectangle, useMap
 } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import {
@@ -10,9 +10,11 @@ import {
   AlertTriangle, Download, Sparkles, CheckCircle2, ShieldAlert
 } from 'lucide-react';
 import { useAppStore } from '@/store';
-import { demoHotspots, DEMO_CENTER, DEMO_LABEL } from '@/data/demo';
-import { cn, formatDate, getSeverityLabel } from '@/lib/utils';
-import type { Hotspot, Severity, LatLng } from '@/types';
+import { AreaGate } from '@/components/ui/AreaGate';
+import { SourceBadge } from '@/components/ui/SourceBadge';
+import { AreaOutline, BaseTiles, FitBounds, areaBounds } from '@/components/map/MapLayers';
+import { cn, average, formatDate, formatTemp, getSeverityLabel } from '@/lib/utils';
+import type { AreaData, Hotspot, Severity, LatLng } from '@/types';
 import toast from 'react-hot-toast';
 
 const SEV_COLORS: Record<string, string> = {
@@ -23,18 +25,27 @@ const SEV_COLORS: Record<string, string> = {
 
 function MapFlyTo({ coords }: { coords: LatLng | null }) {
   const map = useMap();
-  if (coords) {
-    map.flyTo([coords.lat, coords.lng], 14, { duration: 1 });
-  }
+  useEffect(() => {
+    if (coords) map.flyTo([coords.lat, coords.lng], 14, { duration: 1 });
+  }, [coords, map]);
   return null;
 }
 
 export default function HotspotsPage() {
+  return <AreaGate>{data => <Hotspots data={data} />}</AreaGate>;
+}
+
+function Hotspots({ data }: { data: AreaData }) {
   const { setSelectedHotspot, selectedHotspot, setChatContext, setChatVisible } = useAppStore();
+  const { area, hotspots, thresholds, provenance } = data;
+
+  // The temperature slider runs from the hotspot threshold to the hottest reading in this area
+  const sliderMin = Math.floor(thresholds.hotspot ?? thresholds.tempMin ?? 25);
+  const sliderMax = Math.max(sliderMin + 1, Math.ceil(thresholds.tempMax ?? 45));
 
   const [search, setSearch] = useState('');
   const [severityFilter, setSeverityFilter] = useState<Severity | 'all'>('all');
-  const [minTemp, setMinTemp] = useState<number>(30);
+  const [minTemp, setMinTemp] = useState<number>(sliderMin);
   const [sortKey, setSortKey] = useState<'priorityScore' | 'surfaceTemp' | 'vegetationCoverage'>('priorityScore');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -42,7 +53,7 @@ export default function HotspotsPage() {
 
   // Filtered & sorted hotspots
   const filtered = useMemo(() => {
-    return demoHotspots
+    return hotspots
       .filter(h => {
         if (search && !h.name.toLowerCase().includes(search.toLowerCase()) && !h.location.toLowerCase().includes(search.toLowerCase())) {
           return false;
@@ -50,21 +61,21 @@ export default function HotspotsPage() {
         if (severityFilter !== 'all' && h.severity !== severityFilter) {
           return false;
         }
-        if (h.surfaceTemp < minTemp) {
+        if (minTemp > sliderMin && (h.surfaceTemp ?? -Infinity) < minTemp) {
           return false;
         }
         return true;
       })
       .sort((a, b) => {
         const factor = sortDir === 'asc' ? 1 : -1;
-        return (a[sortKey] - b[sortKey]) * factor;
+        return ((a[sortKey] ?? -Infinity) - (b[sortKey] ?? -Infinity)) * factor;
       });
-  }, [search, severityFilter, minTemp, sortKey, sortDir]);
+  }, [hotspots, search, severityFilter, minTemp, sliderMin, sortKey, sortDir]);
 
-  const totalHotspots = demoHotspots.length;
-  const highPriorityCount = demoHotspots.filter(h => h.severity === 'high').length;
-  const avgTemp = (demoHotspots.reduce((sum, h) => sum + h.surfaceTemp, 0) / demoHotspots.length).toFixed(1);
-  const activeFiltersCount = (search ? 1 : 0) + (severityFilter !== 'all' ? 1 : 0) + (minTemp > 30 ? 1 : 0);
+  const totalHotspots = hotspots.length;
+  const highPriorityCount = hotspots.filter(h => h.severity === 'high').length;
+  const avgTemp = formatTemp(average(hotspots.map(h => h.surfaceTemp)));
+  const activeFiltersCount = (search ? 1 : 0) + (severityFilter !== 'all' ? 1 : 0) + (minTemp > sliderMin ? 1 : 0);
 
   const toggleSort = (key: typeof sortKey) => {
     if (sortKey === key) {
@@ -91,28 +102,32 @@ export default function HotspotsPage() {
   };
 
   const handleExportCSV = () => {
-    const headers = ['ID', 'Name', 'Location', 'Latitude', 'Longitude', 'Surface Temp (C)', 'Vegetation (%)', 'Severity', 'Priority Score', 'Last Updated'];
+    const headers = ['ID', 'Name', 'Location', 'Latitude', 'Longitude', 'Surface Temp (C)', 'Vegetation (%)', 'Severity', 'Priority Score', 'Area (km2)', 'Residents', 'Image Date', 'Source'];
     const rows = filtered.map(h => [
       h.id,
       `"${h.name}"`,
       `"${h.location}"`,
       h.coordinates.lat,
       h.coordinates.lng,
-      h.surfaceTemp,
+      h.surfaceTemp ?? '',
       h.vegetationCoverage,
       h.severity,
       h.priorityScore,
-      h.lastUpdated,
+      h.area ?? '',
+      h.people ?? '',
+      h.imageDate,
+      `"${h.dataSource}"`,
     ]);
 
-    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
-    const encodedUri = encodeURI(csvContent);
+    const csv = [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
     const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
+    link.setAttribute('href', url);
     link.setAttribute('download', `climatesmart_hotspots_${new Date().toISOString().slice(0, 10)}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    URL.revokeObjectURL(url);
     toast.success(`Exported ${filtered.length} hotspots to CSV`);
   };
 
@@ -125,7 +140,7 @@ export default function HotspotsPage() {
           <div>
             <h2 className="text-2xl font-black text-[var(--text-primary)]">Urban Heat Hotspots</h2>
             <p className="text-sm text-[var(--text-secondary)] mt-0.5">
-              Identify areas with elevated surface temperatures and prioritize heat resilience interventions.
+              Identify areas with elevated surface temperatures in {area.name} and prioritize heat resilience interventions.
             </p>
           </div>
           <button
@@ -144,7 +159,7 @@ export default function HotspotsPage() {
               <Flame size={15} className="text-[var(--alert-high)]" /> Total Detected
             </div>
             <p className="text-2xl font-black text-[var(--text-primary)] my-1">{totalHotspots}</p>
-            <span className="text-[10px] text-[var(--text-muted)]">Monitored sectors</span>
+            <span className="text-[10px] text-[var(--text-muted)]">Clusters in the {area.widthKm} km area</span>
           </div>
 
           <div className="card p-4 flex flex-col justify-between">
@@ -152,14 +167,16 @@ export default function HotspotsPage() {
               <ShieldAlert size={15} className="text-[var(--alert-high)]" /> High Priority
             </div>
             <p className="text-2xl font-black text-[var(--alert-high)] my-1">{highPriorityCount}</p>
-            <span className="text-[10px] text-[var(--text-muted)]">Critical threshold &gt; 35°C</span>
+            <span className="text-[10px] text-[var(--text-muted)]">
+              Priority 70+ · critical ≥ {formatTemp(thresholds.critical)}
+            </span>
           </div>
 
           <div className="card p-4 flex flex-col justify-between">
             <div className="flex items-center gap-2 text-xs font-semibold text-[var(--text-muted)]">
               <Thermometer size={15} className="text-[var(--alert-medium)]" /> Avg Hotspot Temp
             </div>
-            <p className="text-2xl font-black text-[var(--text-primary)] my-1">{avgTemp}°C</p>
+            <p className="text-2xl font-black text-[var(--text-primary)] my-1">{avgTemp}</p>
             <span className="text-[10px] text-[var(--text-muted)]">Across active clusters</span>
           </div>
 
@@ -175,18 +192,27 @@ export default function HotspotsPage() {
         {/* Interactive Hotspot Map */}
         <div className="card overflow-hidden h-72 relative rounded-2xl border border-[var(--border)] shadow-md">
           <MapContainer
-            center={[DEMO_CENTER.lat, DEMO_CENTER.lng]}
-            zoom={11}
+            center={[area.coordinates.lat, area.coordinates.lng]}
+            zoom={12}
             style={{ height: '100%', width: '100%', background: '#07111F' }}
             scrollWheelZoom={false}
           >
-            <TileLayer
-              url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-              attribution='Esri Satellite'
-            />
+            <BaseTiles />
+            <FitBounds bounds={areaBounds(area)} />
             <MapFlyTo coords={focusedCoords} />
+            <AreaOutline area={area} />
 
-            {demoHotspots.map(h => (
+            {/* The grid cells that make up each hotspot */}
+            {hotspots.flatMap(h => (h.cells ?? []).map(c => (
+              <Rectangle
+                key={`${h.id}-${c.row}-${c.col}`}
+                bounds={c.bounds}
+                interactive={false}
+                pathOptions={{ color: SEV_COLORS[h.severity], weight: 0.5, fillOpacity: selectedHotspot?.id === h.id ? 0.4 : 0.2 }}
+              />
+            )))}
+
+            {hotspots.map(h => (
               <CircleMarker
                 key={h.id}
                 center={[h.coordinates.lat, h.coordinates.lng]}
@@ -203,7 +229,7 @@ export default function HotspotsPage() {
                   <div className="p-1 text-slate-900">
                     <p className="font-bold text-sm">{h.name}</p>
                     <p className="text-xs text-slate-600">{h.location}</p>
-                    <p className="text-xs font-semibold text-red-600 mt-1">{h.surfaceTemp}°C · {h.vegetationCoverage}% veg</p>
+                    <p className="text-xs font-semibold text-red-600 mt-1">{formatTemp(h.surfaceTemp)} · {h.vegetationCoverage}% veg</p>
                   </div>
                 </Popup>
               </CircleMarker>
@@ -212,6 +238,13 @@ export default function HotspotsPage() {
           <div className="absolute top-3 left-3 z-[1000] px-3 py-1 rounded-xl bg-[var(--bg-panel)]/90 backdrop-blur-md border border-[var(--border)] text-xs text-[var(--text-secondary)]">
             Click hotspot marker to inspect details
           </div>
+          {hotspots.length === 0 && (
+            <div className="absolute inset-0 z-[1000] flex items-center justify-center pointer-events-none">
+              <span className="px-4 py-2 rounded-xl bg-[var(--bg-panel)]/90 border border-[var(--border)] text-xs text-[var(--text-secondary)]">
+                No heat hotspots stand out in {area.name} at current thresholds
+              </span>
+            </div>
+          )}
         </div>
 
         {/* Filter Toolbar */}
@@ -251,7 +284,7 @@ export default function HotspotsPage() {
 
             {activeFiltersCount > 0 && (
               <button
-                onClick={() => { setSearch(''); setSeverityFilter('all'); setMinTemp(30); }}
+                onClick={() => { setSearch(''); setSeverityFilter('all'); setMinTemp(sliderMin); }}
                 className="text-xs text-[var(--alert-high)] font-semibold hover:underline flex items-center gap-1"
               >
                 <X size={12} /> Clear all
@@ -294,8 +327,8 @@ export default function HotspotsPage() {
                   </label>
                   <input
                     type="range"
-                    min="30"
-                    max="38"
+                    min={sliderMin}
+                    max={sliderMax}
                     step="0.5"
                     value={minTemp}
                     onChange={e => setMinTemp(parseFloat(e.target.value))}
@@ -313,9 +346,7 @@ export default function HotspotsPage() {
             <span className="text-sm font-bold text-[var(--text-primary)]">
               Prioritized Hotspot Registry ({filtered.length})
             </span>
-            <span className="text-[11px] text-[var(--text-muted)] italic">
-              ⚠ {DEMO_LABEL}
-            </span>
+            <SourceBadge source={provenance.surfaceTemp} />
           </div>
 
           <div className="overflow-x-auto">
@@ -372,7 +403,7 @@ export default function HotspotsPage() {
                       </span>
                     </td>
                     <td className="px-4 py-3 text-[var(--text-secondary)]">{hs.location}</td>
-                    <td className="px-4 py-3 font-mono font-bold text-[var(--alert-high)]">{hs.surfaceTemp}°C</td>
+                    <td className="px-4 py-3 font-mono font-bold text-[var(--alert-high)]">{formatTemp(hs.surfaceTemp)}</td>
                     <td className="px-4 py-3 font-mono text-[var(--text-secondary)]">{hs.vegetationCoverage}%</td>
                     <td className="px-4 py-3 font-mono font-bold text-[var(--text-primary)]">{hs.priorityScore} / 100</td>
                     <td className="px-4 py-3">
@@ -444,7 +475,7 @@ export default function HotspotsPage() {
                 <div className="grid grid-cols-2 gap-2.5">
                   <div className="card p-3 rounded-xl bg-[var(--bg-card)] border border-[var(--border)]">
                     <span className="text-[10px] text-[var(--text-muted)] uppercase tracking-wide block">Surface Temp</span>
-                    <span className="text-2xl font-black text-[var(--alert-high)]">{selectedHotspot.surfaceTemp}°C</span>
+                    <span className="text-2xl font-black text-[var(--alert-high)]">{formatTemp(selectedHotspot.surfaceTemp)}</span>
                   </div>
                   <div className="card p-3 rounded-xl bg-[var(--bg-card)] border border-[var(--border)]">
                     <span className="text-[10px] text-[var(--text-muted)] uppercase tracking-wide block">Vegetation</span>
@@ -456,9 +487,15 @@ export default function HotspotsPage() {
                   </div>
                   <div className="card p-3 rounded-xl bg-[var(--bg-card)] border border-[var(--border)]">
                     <span className="text-[10px] text-[var(--text-muted)] uppercase tracking-wide block">Footprint</span>
-                    <span className="text-2xl font-black text-[var(--text-primary)]">{selectedHotspot.area ?? 2.1} km²</span>
+                    <span className="text-2xl font-black text-[var(--text-primary)]">{selectedHotspot.area ?? '–'} km²</span>
                   </div>
                 </div>
+
+                <p className="text-[11px] text-[var(--text-muted)] flex flex-wrap gap-x-3 gap-y-1">
+                  <span className="flex items-center gap-1"><Calendar size={12} /> Imagery {formatDate(selectedHotspot.imageDate)}</span>
+                  {selectedHotspot.people != null && <span>~{selectedHotspot.people.toLocaleString()} residents</span>}
+                  <span>{selectedHotspot.dataSource}</span>
+                </p>
 
                 {/* Contributing factors */}
                 <div className="space-y-2">
@@ -474,7 +511,7 @@ export default function HotspotsPage() {
                     ))}
                   </div>
                   <p className="text-[10px] text-[var(--text-muted)] italic">
-                    Note: Contributing factors are derived from land use classification models.
+                    Note: Contributing factors are derived from ESA WorldCover land cover and the satellite measurements.
                   </p>
                 </div>
 
