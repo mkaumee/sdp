@@ -6,7 +6,9 @@ A premium climate intelligence platform for urban planners and environmental dec
 
 ClimateSmart AI provides satellite-derived urban heat and vegetation data, AI-powered insights, and interactive tools for identifying heat hotspots and greening opportunities.
 
-> **Demo Mode**: All data in this application is illustrative sample data, not real satellite measurements.
+All numbers come from the ClimateSmart AI Python server (`app.py` in the folder above), which reads
+Landsat 8/9 surface temperature, Sentinel-2 vegetation, ESA WorldCover land cover and Meta population data for
+the selected area. Every figure shows the satellite scene it came from.
 
 ## Features
 
@@ -30,28 +32,37 @@ ClimateSmart AI provides satellite-derived urban heat and vegetation data, AI-po
 
 ## Getting Started
 
+Start the Python server first (see the main README), then:
+
 ```bash
 npm install
-npm run dev
+npm run dev      # live-reload dev server; /api calls go to the Python server on port 5000
 ```
 
 Open [http://localhost:5173](http://localhost:5173) in your browser.
+
+For the normal app, run `npm run build` once; the Python server then serves the built app at
+[http://127.0.0.1:5000](http://127.0.0.1:5000).
 
 ## Project Structure
 
 ```
 src/
 ├── types/        # TypeScript domain types
-├── data/         # Demo/mock data
 ├── store/        # Zustand state store
-├── services/     # API & service layer
+├── services/     # Calls to the Python server (api.ts) and the chat service
 ├── lib/          # Utility functions
 ├── components/   # Reusable UI components
-│   ├── ui/       # Primitive components
+│   ├── ui/       # Primitive components, loading/error gate, data-source badge
+│   ├── map/      # Shared map layers (base tiles, measured overlays, label pins)
+│   ├── chat/     # The assistant panel
 │   └── layout/   # Layout components
 └── pages/        # Route-level page components
 ```
 
-## Data Disclaimer
+## Data Notes
 
-All temperature, vegetation, and hotspot data shown in this application is **illustrative sample data** created for demonstration purposes. It does not represent real satellite observations, real locations, or real environmental measurements. The Lagos, Nigeria region is used as a geographic reference only.
+Temperature, vegetation and hotspot figures are measured from satellite imagery for the selected area. When
+Landsat thermal data can't be reached, surface temperature is an **estimate** (NASA POWER air temperature plus
+land cover), and the dashboard marks it as such. Hotspots and greening sites are screening results from fixed
+rules; ground-truthing is required before investment decisions.

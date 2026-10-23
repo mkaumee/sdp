@@ -1,7 +1,35 @@
 ClimateSmart AI
 ===============
-**Find where to build data centres and townships without harming the planet or the people already living there.**
+**Find where to build data centres and townships without harming the planet or the people already living there,
+and show existing townships where heat builds up and where trees and shade would help most.**
 
+The app has two parts, served by the same Python server:
+
+- **The dashboard** (`/`, the team's ClimateSearch React UI): urban heat and greening intelligence for any
+  area. It measures surface temperature (Landsat 8/9) and vegetation (Sentinel-2), finds heat hotspots,
+  proposes greening sites, writes reports and has a chat assistant that shows real satellite photos.
+- **The site finder** (`/site-finder`): pick a place for a new **data centre** or **township**.
+
+The dashboard
+-------------
+Every number comes from satellite data for the selected area (Shah Alam's City of Elmina by default; search
+any place or click the map to analyse somewhere else). Each page keeps the UI's own layout and labels:
+
+| Page | What it shows |
+|---|---|
+| **Overview** | Average surface temperature, vegetation cover, hotspot count and greening sites; a satellite map with the measured heat or vegetation layer; priority signals; a temperature-vs-vegetation chart with the real correlation; the 3 × 3 zone table |
+| **Map Explorer** | Temperature and NDVI overlays, hotspots, green cells and zone boundaries. Click any point for that grid cell's measurements. Search zones, hotspots, any place or typed coordinates, and re-analyse at 5–20 km |
+| **Hotspots** | Ranked heat hotspots with contributing factors, residents affected, mitigations, filters and CSV export |
+| **Greening** | Candidate sites (pocket parks, street-tree corridors, rooftop greening) sized in hectares, the hotspot each one cools, and new proposals that take a real zone's measurements |
+| **Reports** | Six report templates. The wizard picks zones, an optional imagery date range and metrics; the server writes the findings, metric values and methodology. Print or export as CSV |
+| **Chat** | Claude Haiku 5.5 answers from the analysis and can attach a Sentinel-2 photo of the area, a hotspot, a greening site or a zone. Without an API key it answers from the data in offline mode |
+| **Settings** | Assistant response style, base map, motion, °C/°F, and where every number came from |
+
+Every figure is labelled with its source. If Landsat can't be reached, temperature is **estimated** from
+NASA POWER air temperature and land cover, and the dashboard says so in amber everywhere it appears.
+
+The site finder
+---------------
 Click any place on the map (or search for it), say what you're planning, and ClimateSmart AI reads free
 satellite data for that area. It then:
 
@@ -57,39 +85,63 @@ Satellite data used (all free, no keys)
 ---------------------------------------
 | Dataset | What it gives us | Detail |
 |---|---|---|
+| [Sentinel-2 Level-2A](https://registry.opendata.aws/sentinel-2-l2a-cogs/) (AWS Open Data) | Dashboard: NDVI vegetation from the red and near-infrared bands, cloud-masked; true-colour photos for the chat | 10 m |
+| [Landsat 8/9 Collection 2 Level-2](https://planetarycomputer.microsoft.com/dataset/landsat-c2-l2) (Microsoft Planetary Computer) | Dashboard: land surface temperature, cloud-masked | 30 m |
 | [ESA WorldCover 2021](https://esa-worldcover.org) (Sentinel-1/2) | Trees, grass, crops, buildings, water, wetland, mangroves | 10 m |
 | [Meta High Resolution Settlement Layer](https://dataforgood.facebook.com/dfg/tools/high-resolution-population-density-maps) | How many people live in each spot | 30 m |
 | [Copernicus DEM GLO-30](https://spacedata.copernicus.eu/collections/copernicus-digital-elevation-model) | Height, slopes, low flood-prone land near rivers and the sea | 30 m |
 | [NASA POWER](https://power.larc.nasa.gov) climatology | Average temperature, hottest-month highs, rainfall, humidity | ~50 km |
 | Esri World Imagery, OpenStreetMap, NASA GIBS MODIS | Background maps; Esri photos for the vision check | – |
 
-The land-cover, population and height maps are read straight from public cloud storage (AWS Open Data).
-Only the small piece covering your area is downloaded, so an analysis takes about 2–3 seconds.
+The land-cover, population, height and Sentinel-2 maps are read straight from public cloud storage (AWS Open
+Data), and Landsat from Microsoft's Planetary Computer. Only the small piece covering your area is downloaded.
+A site-finder analysis takes about 2–3 seconds; the dashboard's first look at an area takes about 10–30 seconds
+(it picks the clearest recent scenes) and is then cached.
 
 How to run
 ----------
-1. Install Python 3.10 or newer.
-2. Open a terminal in this folder and run:
+1. Install Python 3.10 or newer and Node.js 18 or newer.
+2. Build the dashboard once (and again after changing anything in `ClimateSearch/`):
+
+       cd ClimateSearch
+       npm install
+       npm run build
+       cd ..
+
+3. Open a terminal in this folder and run:
 
        python -m venv .venv
        .venv\Scripts\activate          (Windows)   or   source .venv/bin/activate   (macOS/Linux)
        pip install -r requirements.txt
        python app.py
 
-3. Open http://127.0.0.1:5000 in a browser.
-4. Optional Claude features: create an API key at https://console.anthropic.com. Set it before
+4. Open http://127.0.0.1:5000 for the dashboard, or http://127.0.0.1:5000/site-finder for the site finder.
+
+5. Optional Claude features: create an API key at https://console.anthropic.com. Set it before
    `python app.py`:
 
        set ANTHROPIC_API_KEY=sk-ant-...          (Windows cmd)
        $env:ANTHROPIC_API_KEY="sk-ant-..."       (Windows PowerShell)
        export ANTHROPIC_API_KEY=sk-ant-...       (macOS/Linux)
 
-   Everything else works without a key.
+   Everything else works without a key; the dashboard's chat then answers from the data in offline mode.
 
 An internet connection is required.
 
+While working on the dashboard, `npm run dev` inside `ClimateSearch/` serves it with live reload on
+http://localhost:5173 and passes `/api` calls to the Python server, which must be running too.
+
 4-minute demo script
 --------------------
+Dashboard:
+1. Open the **Overview**: City of Elmina's average surface temperature, vegetation and hotspots, each with
+   the satellite scene it came from. Switch the map between **Heat** and **Vegetation**.
+2. Click the top **Priority Signal**, then *Ask Assistant*. Ask *"Show me the hottest satellite image"*
+   and the chat shows the real Sentinel-2 photo.
+3. On **Greening**, open the largest site and show which hotspot it cools. On **Reports**, generate an
+   *Urban Heat Island Assessment* and print it.
+
+Site finder (`/site-finder`):
 1. Click **Cyberjaya** (one of Malaysia's data-centre hubs) with **Data centre** selected, 30 MW.
    - Read out the score, the red flags and the water budget.
    - Click best spot **1** on the map.
@@ -102,8 +154,24 @@ An internet connection is required.
 5. In the chat, ask *"Where is the flood risk?"* and watch Claude outline the areas on the map.
    Then ask *"Which spot is best and why?"*
 
-How the scores work (short version)
------------------------------------
+How the dashboard's numbers work
+--------------------------------
+- The area (10 km by default) is split into a **12 × 12 grid** of cells, grouped into **3 × 3 compass zones**.
+- **Surface temperature:** the clearest recent Landsat 8/9 scenes in the last year, clouds removed with the
+  scene's quality band. Small cloud gaps are filled with a land-cover estimate that is shifted to match the real
+  readings, and this is noted.
+- **Vegetation:** the share of 10 m Sentinel-2 pixels with NDVI ≥ 0.4, from the clearest recent scenes (cloud
+  gaps are filled from the next scene, then from WorldCover).
+- **Priority score (0–100):** 45% heat, 35% missing vegetation and 20% residents exposed. 70+ is high, 45+ is
+  medium.
+- **Hotspots:** clusters of cells in the hottest quarter of the area (and at least 1 °C above its median) with
+  under 30% vegetation and at least 25% hard or bare ground.
+- **Greening sites:** one per hotspot plus other hot, bare cells. Lots of open ground → pocket park; densely
+  built with little open ground → rooftop greening; otherwise → street-tree corridor, sized to reach 30%
+  canopy.
+
+How the site finder's scores work (short version)
+-------------------------------------------------
 - **Water:** usable rain-fed water within a 20 km area is compared with what residents and the new
   project would use. Using 10% of the supply is fine; 40% or more is high stress; 100% or more is
   unsustainable.
@@ -122,6 +190,10 @@ How the scores work (short version)
 
 Limitations (worth saying to judges)
 ------------------------------------
+- Landsat surface temperature is the ground's skin temperature in mid-morning (about 10 am), not air temperature.
+  When Landsat can't be reached, the dashboard's temperatures are a labelled **estimate** (±3 °C).
+- The dashboard's hotspots, zones and greening sites are screening results from fixed rules; check them on
+  the ground before investing.
 - WorldCover counts **plantations (oil palm, rubber) as tree cover**, so "forest" can include
   plantations. Check on the ground.
 - The height map measures the tops of trees and buildings. We filter them out, but flood-prone land is
@@ -138,12 +210,18 @@ Files
 -----
 | File | What it is |
 |---|---|
-| `app.py` | Flask web server: place search, `/api/analyze`, `/api/vision-check`, `/api/chat`, `/api/image` |
+| `app.py` | Flask web server: place search, the dashboard's `/api/area`, `/api/reports`, `/api/assistant`, and the site finder's `/api/analyze`, `/api/vision-check`, `/api/chat`, `/api/image` |
+| `ClimateSearch/` | The dashboard: React + TypeScript + Vite (build it with `npm run build`; Flask serves `ClimateSearch/dist`) |
+| `urban.py` | The dashboard's analysis: grid cells, zones, hotspots, greening sites, headline numbers, map overlays |
+| `sentinel2.py` | Sentinel-2 NDVI and true-colour photos from AWS Open Data |
+| `landsat.py` | Landsat 8/9 surface temperature from Microsoft Planetary Computer |
+| `reports.py` | The dashboard's six report templates |
+| `assistant.py` | The dashboard's chat assistant (Claude Haiku, or offline answers without a key) |
 | `ai.py` | Claude vision check (Opus) and chat guide with map highlights (Haiku) |
 | `imagery.py` | Builds the outlined satellite photo of each spot from Esri map tiles |
 | `analysis.py` | Scores, best spots, heat hotspots, water budget, recommendations |
 | `datasources.py` | Reads WorldCover, population, height and NASA POWER data |
-| `Design.Html`, `Design.Css`, `Design.Js` | The map dashboard |
+| `Design.Html`, `Design.Css`, `Design.Js` | The site finder page |
 | `vendor/leaflet/` | Leaflet 1.9.4 map library (BSD-2 licence), so the map works without a CDN |
 | `tests/` | Automated tests: `pip install pytest` then `python -m pytest` (no internet needed) |
 | `requirements.txt` | Python libraries needed |
