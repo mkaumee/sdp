@@ -234,6 +234,13 @@
     color: #B7E65C !important;
   }
 
+  /* Settings > "Smooth micro-interactions" switched off */
+  .reduce-motion *, .reduce-motion *::before, .reduce-motion *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+
   /* Label pins on the maps (components/map/MapLayers.tsx) */
   .climate-pin {
     background: transparent;

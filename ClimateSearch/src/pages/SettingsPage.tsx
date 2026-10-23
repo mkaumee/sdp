@@ -1,12 +1,13 @@
-import { useState } from 'react';
 import { motion } from 'framer-motion';
 import {
   Settings, Sun, Moon, Monitor, Map, MessageSquare,
   Database, User, Shield, Trash2, CheckCircle2, RotateCcw,
   Sparkles, ExternalLink
 } from 'lucide-react';
-import { useAppStore } from '@/store';
-import type { Theme } from '@/types';
+import { useAppStore, DEFAULT_AREA } from '@/store';
+import { SourceBadge } from '@/components/ui/SourceBadge';
+import { formatCoords, formatDate } from '@/lib/utils';
+import type { AssistantStyle, Theme } from '@/types';
 import toast from 'react-hot-toast';
 
 export default function SettingsPage() {
@@ -14,12 +15,13 @@ export default function SettingsPage() {
     theme, setTheme,
     units, setUnits,
     chatVisible, setChatVisible,
-    clearChat
+    clearChat,
+    responseStyle, setResponseStyle,
+    baseMap: defaultLayer, setBaseMap: setDefaultLayer,
+    animationsEnabled, setAnimationsEnabled,
+    area, areaData, setArea,
   } = useAppStore();
-
-  const [responseStyle, setResponseStyle] = useState<'concise' | 'scientific' | 'strategic'>('scientific');
-  const [defaultLayer, setDefaultLayer] = useState<'satellite' | 'street'>('satellite');
-  const [animationsEnabled, setAnimationsEnabled] = useState(true);
+  const prov = areaData?.provenance;
 
   const handleClearChatHistory = () => {
     clearChat();
@@ -31,6 +33,8 @@ export default function SettingsPage() {
     setUnits('metric');
     setChatVisible(true);
     setResponseStyle('scientific');
+    setDefaultLayer('satellite');
+    setAnimationsEnabled(true);
     toast.success('Preferences reset to default values');
   };
 
@@ -88,7 +92,7 @@ export default function SettingsPage() {
             <p className="text-[11px] text-[var(--text-muted)]">Enable subtle card transitions and chart animations</p>
           </div>
           <button
-            onClick={() => setAnimationsEnabled(p => !p)}
+            onClick={() => setAnimationsEnabled(!animationsEnabled)}
             className={`w-11 h-6 flex items-center rounded-full p-1 cursor-pointer transition-colors ${
               animationsEnabled ? 'bg-[var(--accent)]' : 'bg-[var(--bg-card)] border border-[var(--border)]'
             }`}
@@ -116,7 +120,7 @@ export default function SettingsPage() {
             </label>
             <select
               value={defaultLayer}
-              onChange={e => setDefaultLayer(e.target.value as any)}
+              onChange={e => setDefaultLayer(e.target.value as 'satellite' | 'street')}
               className="input-base"
             >
               <option value="satellite">Esri World Imagery (Satellite)</option>
@@ -134,9 +138,26 @@ export default function SettingsPage() {
               className="input-base"
             >
               <option value="metric">Metric (°C, Hectares, Kilometers)</option>
-              <option value="imperial">Imperial (°F, Acres, Miles)</option>
+              <option value="imperial">Imperial (°F temperatures)</option>
             </select>
+            <p className="text-[10px] text-[var(--text-muted)] mt-1">Reports and assistant answers stay in °C.</p>
           </div>
+        </div>
+
+        <div className="pt-3 border-t border-[var(--border)] flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+          <div>
+            <p className="font-semibold text-[var(--text-primary)]">Analysis Area</p>
+            <p className="text-[11px] text-[var(--text-muted)]">
+              {areaData?.area.location ?? area.name ?? 'Loading…'} · {formatCoords(area.lat, area.lng)} · {area.widthKm} km wide.
+              Change it from the Map Explorer search.
+            </p>
+          </div>
+          <button
+            onClick={() => { setArea(DEFAULT_AREA); toast('Analysing Shah Alam (default)…', { icon: '🛰️' }); }}
+            className="btn-ghost text-xs py-1.5 px-3 shrink-0"
+          >
+            <RotateCcw size={13} /> Reset to default area
+          </button>
         </div>
       </div>
 
@@ -160,7 +181,7 @@ export default function SettingsPage() {
               ].map(opt => (
                 <button
                   key={opt.id}
-                  onClick={() => setResponseStyle(opt.id as any)}
+                  onClick={() => setResponseStyle(opt.id as AssistantStyle)}
                   className={`p-2.5 rounded-xl border text-xs font-semibold transition-all ${
                     responseStyle === opt.id
                       ? 'border-[var(--accent)] bg-[var(--bg-card)] text-[var(--accent-foreground)]'
@@ -219,13 +240,31 @@ export default function SettingsPage() {
         <div className="space-y-3 text-xs text-[var(--text-secondary)] leading-relaxed">
           <div className="p-3.5 rounded-xl bg-[var(--bg-card)] border border-[var(--border)] space-y-2">
             <p className="font-semibold text-[var(--text-primary)]">Configured Environmental Sensors</p>
-            <p>• <strong>Sentinel-2A (MSI):</strong> Multispectral imaging for NDVI vegetation coverage calculation.</p>
-            <p>• <strong>Landsat-9 (TIRS-2):</strong> Thermal Infrared Sensor Band 10 for Land Surface Temperature derivation.</p>
-            <p>• <strong>OpenStreetMap / Esri:</strong> Basemap vector geography and satellite tile attribution.</p>
+            <p>• <strong>Sentinel-2A/B/C (MSI):</strong> Level-2A red and near-infrared bands (10 m) for NDVI vegetation coverage, and true-colour photos for the assistant (AWS Open Data).</p>
+            <p>• <strong>Landsat 8/9 (TIRS):</strong> Collection 2 Level-2 surface temperature (30 m) for Land Surface Temperature (Microsoft Planetary Computer).</p>
+            <p>• <strong>ESA WorldCover 2021:</strong> 10 m land-cover classes for built-up, tree, water and open ground.</p>
+            <p>• <strong>Meta HRSL:</strong> 30 m population estimates for residents exposed to heat.</p>
+            <p>• <strong>NASA POWER:</strong> climate normals, used only to estimate temperature when Landsat is unreachable.</p>
+            <p>• <strong>OpenStreetMap / Esri:</strong> Place search, basemap vector geography and satellite tile attribution.</p>
           </div>
 
-          <div className="p-3 rounded-xl bg-[var(--alert-medium)] bg-opacity-10 border border-[var(--alert-medium)] border-opacity-30 text-[11px] text-[var(--alert-medium)]">
-            <strong>Demonstration Dataset Notice:</strong> This installation runs in demonstrative evaluation mode. Satellite imagery tiles are live; numerical heat and canopy readings for Lagos metropolitan zones represent illustrative sample data.
+          {prov && (
+            <div className="p-3.5 rounded-xl bg-[var(--bg-card)] border border-[var(--border)] space-y-2">
+              <p className="font-semibold text-[var(--text-primary)]">Current Analysis · {areaData?.area.name}</p>
+              <div className="flex flex-wrap gap-2">
+                <SourceBadge source={prov.surfaceTemp} />
+                <SourceBadge source={prov.vegetation} />
+              </div>
+              <p>Temperature: {prov.surfaceTemp.sensor}{prov.surfaceTemp.dates.length ? ` — scenes ${prov.surfaceTemp.dates.map(formatDate).join(', ')}` : ''}</p>
+              <p>Vegetation: {prov.vegetation.sensor}{prov.vegetation.kind === 'sentinel2' ? ` — scenes ${prov.vegetation.dates.map(formatDate).join(', ')}` : ''}</p>
+              {prov.surfaceTemp.note && <p className="text-[var(--alert-medium)]">⚠ {prov.surfaceTemp.note}</p>}
+              {areaData?.warnings.map(w => <p key={w} className="text-[var(--alert-medium)]">⚠ {w}</p>)}
+            </div>
+          )}
+
+          <div className="p-3 rounded-xl bg-[var(--alert-low)] bg-opacity-10 border border-[var(--alert-low)] border-opacity-30 text-[11px] text-[var(--alert-low)]">
+            <strong>Live Data Notice:</strong> Heat and vegetation readings are computed from the satellite archives for the selected area each time it is analysed.
+            They are screening results — ground-truthing is required before investment decisions.
           </div>
         </div>
       </div>

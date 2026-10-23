@@ -18,7 +18,7 @@ import { SourceBadge } from '@/components/ui/SourceBadge';
 import {
   AreaOutline, BaseTiles, DataOverlay, FitBounds, HEAT_GRADIENT, VEG_GRADIENT, areaBounds, pinIcon,
 } from '@/components/map/MapLayers';
-import { cn, formatTemp, formatDate, formatCoords, getSeverityLabel } from '@/lib/utils';
+import { cn, formatTemp, formatDate, formatCoords, getSeverityLabel, tempUnit, tempValue } from '@/lib/utils';
 import type { AreaData, ClimateZone, Hotspot } from '@/types';
 
 const SEV_COLORS: Record<string, string> = {
@@ -50,7 +50,7 @@ function ScatterTooltip({ active, payload }: ScatterTooltipProps) {
     >
       <p className="font-bold text-sm mb-1">{d?.name}</p>
       <div className="space-y-0.5 text-[var(--text-secondary)]">
-        <p>Surface Temp: <strong className="text-[var(--text-primary)]">{d?.temperature}°C</strong></p>
+        <p>Surface Temp: <strong className="text-[var(--text-primary)]">{d?.temperature}{tempUnit()}</strong></p>
         <p>Vegetation Cover: <strong className="text-[var(--text-primary)]">{d?.vegetation}%</strong></p>
         <p className="flex items-center gap-1.5 mt-1">
           Severity:
@@ -88,7 +88,7 @@ function Overview({ data }: { data: AreaData }) {
   // Scatter points: one per compass zone that has a temperature reading.
   const scatterData = zones
     .filter(z => z.surfaceTemp !== null)
-    .map(z => ({ name: z.name, temperature: z.surfaceTemp as number, vegetation: z.vegetationCoverage, severity: z.severity }));
+    .map(z => ({ name: z.name, temperature: tempValue(z.surfaceTemp as number), vegetation: z.vegetationCoverage, severity: z.severity }));
   const temps = scatterData.map(d => d.temperature);
   const tempDomain = temps.length ? [Math.floor(Math.min(...temps)) - 1, Math.ceil(Math.max(...temps)) + 1] : [25, 40];
 
@@ -222,10 +222,10 @@ function Overview({ data }: { data: AreaData }) {
             <div className="my-3">
               <div className="flex items-baseline gap-1">
                 <span className="text-3xl font-extrabold tracking-tight text-[var(--text-primary)]">
-                  {metric.value}
+                  {metric.unit === '°C' && typeof metric.value === 'number' ? tempValue(metric.value) : metric.value}
                 </span>
                 <span className="text-lg font-semibold text-[var(--text-secondary)]">
-                  {metric.unit}
+                  {metric.unit === '°C' ? tempUnit() : metric.unit}
                 </span>
               </div>
             </div>
@@ -361,10 +361,10 @@ function Overview({ data }: { data: AreaData }) {
             {overlay && (
               <div className="absolute bottom-3 right-3 z-[400] pointer-events-none">
                 <div className="flex items-center gap-3 px-3 py-1.5 rounded-xl text-[11px] bg-[#091522]/90 text-slate-200 border border-slate-700 backdrop-blur-md">
-                  <span className="text-[10px] font-mono font-bold text-slate-300">{overlay.min}{overlay.unit === '°C' ? '°C' : ''}</span>
+                  <span className="text-[10px] font-mono font-bold text-slate-300">{overlay.unit === '°C' ? formatTemp(overlay.min) : overlay.min}</span>
                   <div className="w-20 h-2.5 rounded-full" style={{ background: mapMode === 'heat' ? HEAT_GRADIENT : VEG_GRADIENT }} />
                   <span className="text-[10px] font-mono font-bold text-slate-300">
-                    {overlay.max}{overlay.unit === '°C' ? '°C' : overlay.unit === '%' ? '%' : ''} {overlay.unit === 'NDVI' ? 'NDVI' : ''}
+                    {overlay.unit === '°C' ? formatTemp(overlay.max) : `${overlay.max}${overlay.unit === '%' ? '%' : ' NDVI'}`}
                   </span>
                 </div>
               </div>
@@ -488,8 +488,8 @@ function Overview({ data }: { data: AreaData }) {
                     name="Temperature"
                     domain={tempDomain}
                     tick={{ fontSize: 11, fill: 'var(--text-muted)' }}
-                    unit="°C"
-                    label={{ value: 'Surface Temp (°C)', angle: -90, position: 'insideLeft', style: { fontSize: 11, fill: 'var(--text-muted)' } }}
+                    unit={tempUnit()}
+                    label={{ value: `Surface Temp (${tempUnit()})`, angle: -90, position: 'insideLeft', style: { fontSize: 11, fill: 'var(--text-muted)' } }}
                   />
                   <Tooltip content={<ScatterTooltip />} />
                   <Scatter data={scatterData}>

@@ -6,7 +6,22 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-export function formatTemp(value: number | null | undefined, units: 'metric' | 'imperial' = 'metric'): string {
+// Units chosen in Settings (the store keeps this in step with its `units`)
+let displayUnits: 'metric' | 'imperial' = 'metric';
+export function setDisplayUnits(units: 'metric' | 'imperial') {
+  displayUnits = units;
+}
+
+/** A °C value in the chosen units (the backend always works in °C). */
+export function tempValue(celsius: number, units = displayUnits): number {
+  return units === 'imperial' ? Math.round(((celsius * 9) / 5 + 32) * 10) / 10 : celsius;
+}
+
+export function tempUnit(units = displayUnits): string {
+  return units === 'imperial' ? '°F' : '°C';
+}
+
+export function formatTemp(value: number | null | undefined, units: 'metric' | 'imperial' = displayUnits): string {
   if (value === null || value === undefined) return '–';  // no temperature source was reachable
   if (units === 'imperial') {
     return `${((value * 9) / 5 + 32).toFixed(1)}°F`;

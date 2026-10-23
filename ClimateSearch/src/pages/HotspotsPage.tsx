@@ -323,7 +323,7 @@ function Hotspots({ data }: { data: AreaData }) {
                 <div>
                   <label className="font-semibold text-[var(--text-secondary)] flex justify-between mb-1.5">
                     <span>Minimum Surface Temperature:</span>
-                    <strong className="text-[var(--alert-high)]">{minTemp}°C</strong>
+                    <strong className="text-[var(--alert-high)]">{formatTemp(minTemp)}</strong>
                   </label>
                   <input
                     type="range"

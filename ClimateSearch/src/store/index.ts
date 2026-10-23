@@ -18,6 +18,7 @@ import type {
   Report,
 } from '@/types';
 import { api } from '@/services/api';
+import { setDisplayUnits } from '@/lib/utils';
 
 // Area analysed when the app first opens: Shah Alam (Selangor, Malaysia), around the City of Elmina townships.
 export const DEFAULT_AREA: AreaSelection = { lat: 3.1885, lng: 101.493, widthKm: 10 };
@@ -83,6 +84,10 @@ interface AppState {
   // Preferences
   units: 'metric' | 'imperial';
   setUnits: (units: 'metric' | 'imperial') => void;
+  baseMap: 'satellite' | 'street';
+  setBaseMap: (baseMap: 'satellite' | 'street') => void;
+  animationsEnabled: boolean;
+  setAnimationsEnabled: (enabled: boolean) => void;
 
   // Live analysis of the selected area (from the backend)
   area: AreaSelection;
@@ -179,7 +184,14 @@ export const useAppStore = create<AppState>()(
 
       // Preferences
       units: 'metric',
-      setUnits: (units) => set({ units }),
+      setUnits: (units) => {
+        setDisplayUnits(units);
+        set({ units });
+      },
+      baseMap: 'satellite',
+      setBaseMap: (baseMap) => set({ baseMap }),
+      animationsEnabled: true,
+      setAnimationsEnabled: (animationsEnabled) => set({ animationsEnabled }),
 
       // Live analysis
       area: DEFAULT_AREA,
@@ -229,6 +241,8 @@ export const useAppStore = create<AppState>()(
         chatVisible: state.chatVisible,
         mapLayers: state.mapLayers,
         units: state.units,
+        baseMap: state.baseMap,
+        animationsEnabled: state.animationsEnabled,
         area: state.area,
         responseStyle: state.responseStyle,
         reports: state.reports,
@@ -241,6 +255,9 @@ export const useAppStore = create<AppState>()(
           return old ? { ...l, enabled: old.enabled, opacity: old.opacity } : l;
         });
         return { ...current, ...saved, mapLayers: layers };
+      },
+      onRehydrateStorage: () => (state) => {
+        if (state) setDisplayUnits(state.units);
       },
     }
   )

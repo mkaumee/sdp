@@ -128,14 +128,14 @@ function MapExplorer({ data }: { data: AreaData }) {
     mapLayers, toggleLayer, setLayerOpacity,
     selectedZone, setSelectedZone,
     setSelectedHotspot, setSelectedCandidate,
-    setChatContext, setChatVisible, area: selection, setArea,
+    setChatContext, setChatVisible, area: selection, setArea, baseMap,
   } = useAppStore();
   const { area, provenance, zones, hotspots, greeningCandidates, cells, overlays } = data;
 
   const [searchQuery, setSearchQuery] = useState('');
   const [places, setPlaces] = useState<PlaceResult[]>([]);
   const [selectedEntity, setSelectedEntity] = useState<Intel | null>(null);
-  const [tileSource, setTileSource] = useState<'satellite' | 'street'>('satellite');
+  const [tileSource, setTileSource] = useState<'satellite' | 'street'>(baseMap);
   const [showLayerPanel, setShowLayerPanel] = useState(true);
   const [currentCoords, setCurrentCoords] = useState<LatLng>(area.coordinates);
   const [zoom, setZoom] = useState(mapZoom);
@@ -551,8 +551,8 @@ function MapExplorer({ data }: { data: AreaData }) {
               {legend && (
                 <div className="pt-2 border-t border-[var(--border)] space-y-1.5">
                   <div className="flex justify-between text-[10px] font-mono font-medium text-[var(--text-muted)]">
-                    <span>{legend.min}{legend.unit === '°C' ? '°C (Cooler)' : ` ${legend.unit}`}</span>
-                    <span>{legend.max}{legend.unit === '°C' ? '°C (High Heat)' : ` ${legend.unit}`}</span>
+                    <span>{legend.unit === '°C' ? `${formatTemp(legend.min)} (Cooler)` : `${legend.min} ${legend.unit}`}</span>
+                    <span>{legend.unit === '°C' ? `${formatTemp(legend.max)} (High Heat)` : `${legend.max} ${legend.unit}`}</span>
                   </div>
                   <div className="h-2.5 rounded-full w-full" style={{ background: legend === overlays.temperature ? HEAT_GRADIENT : VEG_GRADIENT }} />
                   <p className="text-[10px] text-[var(--text-muted)] italic">{legend.label}</p>

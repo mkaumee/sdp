@@ -1,6 +1,7 @@
 import { useEffect, Suspense, lazy } from 'react';
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
+import { MotionConfig } from 'framer-motion';
 import { useAppStore } from '@/store';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { ChatPanel } from '@/components/chat/ChatPanel';
@@ -45,7 +46,7 @@ function PageWrapper({ element, path }: { element: JSX.Element; path: string }) 
 }
 
 export default function App() {
-  const { theme, setTheme, setChatContext, areaData, areaStatus, loadArea } = useAppStore();
+  const { theme, setTheme, setChatContext, areaData, areaStatus, loadArea, animationsEnabled } = useAppStore();
   const location = useLocation();
 
   // Analyse the selected area (remembered from last time, or the default) as soon as the app opens
@@ -68,8 +69,13 @@ export default function App() {
     setChatContext({ route: location.pathname });
   }, [location.pathname, setChatContext]);
 
+  // "Smooth micro-interactions" off: no framer-motion or CSS animations
+  useEffect(() => {
+    document.documentElement.classList.toggle('reduce-motion', !animationsEnabled);
+  }, [animationsEnabled]);
+
   return (
-    <>
+    <MotionConfig reducedMotion={animationsEnabled ? 'never' : 'always'}>
       <Routes>
         <Route path="/" element={<Navigate to="/overview" replace />} />
         <Route path="/overview" element={<PageWrapper element={<OverviewPage />} path="/overview" />} />
@@ -94,6 +100,6 @@ export default function App() {
           },
         }}
       />
-    </>
+    </MotionConfig>
   );
 }
