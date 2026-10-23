@@ -5,9 +5,12 @@ import {
   Calendar, MapPin, Layers, BarChart3, Clock, Search,
   ChevronRight, ArrowLeft, ArrowRight, X, AlertCircle, FileSpreadsheet
 } from 'lucide-react';
-import { demoReports, demoZones, demoHotspots, DEMO_LABEL } from '@/data/demo';
-import { cn, formatDate } from '@/lib/utils';
-import type { Report, ReportType } from '@/types';
+import { useAppStore } from '@/store';
+import { api } from '@/services/api';
+import { AreaGate } from '@/components/ui/AreaGate';
+import { EmptyState } from '@/components/ui/EmptyState';
+import { cn, formatDate, formatTemp } from '@/lib/utils';
+import type { AreaData, Report, ReportType } from '@/types';
 import toast from 'react-hot-toast';
 
 interface ReportTemplate {
@@ -63,21 +66,41 @@ const TEMPLATES: ReportTemplate[] = [
   },
 ];
 
+// Extra metrics the wizard offers on top of each template's own
+const EXTRA_METRICS = [
+  'Land Surface Temperature (LST) Mean & Maxima',
+  'Normalized Difference Vegetation Index (NDVI)',
+  'Thermal Heat Exposure Risk Quotient',
+  'Impervious Surface & Albedo Factor',
+  'Canopy Cover Deficit Against WHO 3-30-300 Target',
+  'Tree Planting Feasibility Index',
+];
+
+const isoDaysAgo = (days: number) => new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+
 export default function ReportsPage() {
-  const [reports, setReports] = useState<Report[]>(demoReports);
+  return <AreaGate>{data => <Reports data={data} />}</AreaGate>;
+}
+
+function Reports({ data }: { data: AreaData }) {
+  const { reports, addReport, area: selection } = useAppStore();
+  const { area, zones, provenance } = data;
   const [search, setSearch] = useState('');
   const [activeTab, setActiveTab] = useState<'all' | 'ready' | 'draft'>('all');
-  const [selectedReport, setSelectedReport] = useState<Report | null>(demoReports[0]);
+  const [selectedReport, setSelectedReport] = useState<Report | null>(reports[0] ?? null);
 
   // Generation Wizard State
+  const topZones = [...zones].sort((a, b) => b.priorityScore - a.priorityScore).slice(0, 3).map(z => z.name);
   const [wizardOpen, setWizardOpen] = useState(false);
   const [wizardStep, setWizardStep] = useState<number>(1);
   const [selectedTemplate, setSelectedTemplate] = useState<ReportTemplate>(TEMPLATES[0]);
-  const [selectedLocation, setSelectedLocation] = useState('Lagos Metropolitan Region');
-  const [selectedZones, setSelectedZones] = useState<string[]>(['Central Walk', 'Transit Edge', 'Retail Link']);
-  const [dateRange, setDateRange] = useState({ start: '2024-06-01', end: '2024-09-15' });
+  const [selectedLocation, setSelectedLocation] = useState(area.location);
+  const [selectedZones, setSelectedZones] = useState<string[]>(topZones);
+  const [customDates, setCustomDates] = useState(false);  // off: use the dashboard's latest imagery
+  const [dateRange, setDateRange] = useState({ start: isoDaysAgo(365), end: isoDaysAgo(0) });
   const [selectedMetrics, setSelectedMetrics] = useState<string[]>(TEMPLATES[0].defaultMetrics);
   const [isGenerating, setIsGenerating] = useState(false);
+  const imageryDates = [...provenance.surfaceTemp.dates, ...(provenance.vegetation.kind === 'sentinel2' ? provenance.vegetation.dates : [])].sort();
 
   const filteredReports = reports.filter(r => {
     if (search && !r.title.toLowerCase().includes(search.toLowerCase()) && !r.description.toLowerCase().includes(search.toLowerCase())) {
@@ -105,49 +128,52 @@ export default function ReportsPage() {
     }
   };
 
-  const handleFinishGeneration = () => {
+  const handleFinishGeneration = async () => {
+    if (customDates && dateRange.start > dateRange.end) {
+      toast.error('The start date must be before the end date');
+      return;
+    }
     setIsGenerating(true);
-    setTimeout(() => {
-      const newReport: Report = {
-        id: `rep-${Date.now()}`,
-        title: `${selectedTemplate.title} — ${selectedLocation}`,
-        type: selectedTemplate.type,
-        status: 'ready',
-        createdAt: new Date().toISOString().slice(0, 10),
-        generatedAt: new Date().toISOString().slice(0, 10),
-        location: selectedLocation,
-        dateRange: dateRange,
+    try {
+      const newReport = await api.createReport(selection, {
+        template: selectedTemplate.type,
+        zones: selectedZones,
         metrics: selectedMetrics,
-        description: `Generated ${selectedTemplate.title} for ${selectedZones.join(', ')} covering ${dateRange.start} to ${dateRange.end}.`,
-        dataSource: 'Sentinel-2A & Landsat-9 (Illustrative Demo)',
-      };
-
-      setReports([newReport, ...reports]);
+        dateRange: customDates ? dateRange : undefined,
+        reportLocation: selectedLocation,
+      });
+      addReport(newReport);
       setSelectedReport(newReport);
-      setIsGenerating(false);
       setWizardOpen(false);
       toast.success('Climate report compiled successfully!');
-    }, 1200);
+    } catch (err) {
+      toast.error(`Report failed: ${(err as Error).message}`);
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
-  const handleDownloadCSV = (report: Report) => {
-    const csvContent =
-      'data:text/csv;charset=utf-8,' +
-      [
-        'Report Title,Location,Generated Date,Status,Data Source',
-        `"${report.title}","${report.location || 'Lagos'}","${report.createdAt}","${report.status}","${report.dataSource}"`,
-        '',
-        'Zone,Surface Temp (C),Vegetation Cover (%),Priority',
-        ...demoZones.map(z => `"${z.name}",${z.surfaceTemp},${z.vegetationCoverage},"${z.severity}"`),
-      ].join('\n');
+  const quote = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
 
-    const encodedUri = encodeURI(csvContent);
+  const handleDownloadCSV = (report: Report) => {
+    const reportZones = report.content?.zones ?? zones;
+    const csv = [
+      'Report Title,Location,Generated Date,Status,Data Source',
+      [report.title, report.location || area.location, report.createdAt, report.status, report.dataSource].map(quote).join(','),
+      '',
+      'Zone,Surface Temp (C),Vegetation Cover (%),Priority,Priority Score',
+      ...reportZones.map(z => [quote(z.name), z.surfaceTemp ?? '', z.vegetationCoverage, quote(z.severity), z.priorityScore].join(',')),
+      ...(report.content?.metrics.length ? ['', 'Metric,Value,Note', ...report.content.metrics.map(m => [m.label, m.value, m.note].map(quote).join(','))] : []),
+    ].join('\n');
+
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
     const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
+    link.setAttribute('href', url);
     link.setAttribute('download', `${report.title.toLowerCase().replace(/[^a-z0-9]/g, '_')}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    URL.revokeObjectURL(url);
     toast.success('Downloaded report dataset (CSV)');
   };
 
@@ -164,7 +190,7 @@ export default function ReportsPage() {
           <div>
             <h2 className="text-2xl font-black text-[var(--text-primary)]">Climate Intelligence Reports</h2>
             <p className="text-sm text-[var(--text-secondary)] mt-0.5">
-              Generate standardized environmental resilience assessments, hotspot dossiers, and canopy audits.
+              Generate standardized environmental resilience assessments, hotspot dossiers, and canopy audits for {area.name}.
             </p>
           </div>
           <button
@@ -254,6 +280,15 @@ export default function ReportsPage() {
 
         {/* Report List */}
         <div className="space-y-3">
+          {filteredReports.length === 0 && (
+            <div className="card">
+              <EmptyState
+                icon={<FileText size={28} />}
+                title={reports.length ? 'No reports match' : 'No reports yet'}
+                description={reports.length ? 'Try another search or tab.' : `Launch a template to build a report from the live analysis of ${area.name}.`}
+              />
+            </div>
+          )}
           {filteredReports.map(report => {
             const isSelected = selectedReport?.id === report.id;
             return (
@@ -284,7 +319,7 @@ export default function ReportsPage() {
                   <div className="flex items-center gap-3 text-[11px] text-[var(--text-muted)] pt-1">
                     <span>📅 Created: {formatDate(report.createdAt)}</span>
                     <span>•</span>
-                    <span>📍 {report.location || 'Lagos, Nigeria'}</span>
+                    <span>📍 {report.location || area.location}</span>
                   </div>
                 </div>
 
@@ -349,13 +384,14 @@ export default function ReportsPage() {
                 {/* Document Header */}
                 <div className="border-b border-[var(--border)] pb-4 space-y-1.5">
                   <span className="text-[10px] font-bold tracking-widest text-[var(--accent-green)] uppercase">
-                    Official Environmental Intelligence Document
+                    Environmental Intelligence Document
                   </span>
                   <h2 className="text-xl font-black text-[var(--text-primary)] leading-tight">
                     {selectedReport.title}
                   </h2>
                   <p className="text-xs text-[var(--text-muted)]">
-                    Published: {formatDate(selectedReport.createdAt)} • Jurisdiction: {selectedReport.location || 'Lagos, Nigeria'}
+                    Published: {formatDate(selectedReport.createdAt)} • Jurisdiction: {selectedReport.location || area.location}
+                    {selectedReport.dateRange && ` • Imagery ${selectedReport.dateRange.start} to ${selectedReport.dateRange.end}`}
                   </p>
                 </div>
 
@@ -365,7 +401,7 @@ export default function ReportsPage() {
                     1. Executive Findings
                   </h4>
                   <p className="text-[var(--text-secondary)] leading-relaxed p-3.5 rounded-xl bg-[var(--bg-card)] border border-[var(--border)]">
-                    Analysis across monitored townships indicates high surface temperature concentration in dense commercial sectors (up to 37.4°C), driven by high impervious surface ratios and sub-15% vegetation canopy. Immediate priority intervention recommended for Lagos Island and Ikeja corridors.
+                    {selectedReport.content?.summary ?? selectedReport.description}
                   </p>
                 </div>
 
@@ -385,10 +421,10 @@ export default function ReportsPage() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-[var(--border)]">
-                        {demoZones.slice(0, 4).map(z => (
-                          <tr key={z.id}>
+                        {(selectedReport.content?.zones ?? []).map(z => (
+                          <tr key={z.name}>
                             <td className="p-2 font-semibold text-[var(--text-primary)]">{z.name}</td>
-                            <td className="p-2 font-mono text-[var(--alert-high)]">{z.surfaceTemp}°C</td>
+                            <td className="p-2 font-mono text-[var(--alert-high)]">{formatTemp(z.surfaceTemp)}</td>
                             <td className="p-2 font-mono text-[var(--accent-green)]">{z.vegetationCoverage}%</td>
                             <td className="p-2 uppercase font-bold text-[10px]">{z.severity}</td>
                           </tr>
@@ -398,18 +434,36 @@ export default function ReportsPage() {
                   </div>
                 </div>
 
+                {/* Analytical metrics chosen in the wizard */}
+                {!!selectedReport.content?.metrics.length && (
+                  <div className="space-y-1.5">
+                    <h4 className="font-bold text-[var(--text-primary)] uppercase text-[11px] tracking-wide">
+                      3. Analytical Metrics
+                    </h4>
+                    <div className="rounded-xl border border-[var(--border)] divide-y divide-[var(--border)]">
+                      {selectedReport.content.metrics.map(m => (
+                        <div key={m.label} className="p-2.5 space-y-0.5">
+                          <p className="text-[10px] uppercase tracking-wide text-[var(--text-muted)]">{m.label}</p>
+                          <p className="font-semibold text-[var(--text-primary)]">{m.value}</p>
+                          {m.note && <p className="text-[10px] text-[var(--text-muted)] italic">{m.note}</p>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 {/* Methodology & Provenance */}
                 <div className="space-y-1.5">
                   <h4 className="font-bold text-[var(--text-primary)] uppercase text-[11px] tracking-wide">
-                    3. Methodology & Uncertainty
+                    {selectedReport.content?.metrics.length ? 4 : 3}. Methodology & Uncertainty
                   </h4>
                   <div className="p-3.5 rounded-xl bg-[var(--bg-card)] border border-[var(--border)] text-[11px] text-[var(--text-muted)] space-y-1.5 leading-relaxed">
                     <p>• Data source: <strong className="text-[var(--text-secondary)]">{selectedReport.dataSource}</strong></p>
-                    <p>• Thermal Radiance Sensor: Landsat-9 TIRS Band 10 & Sentinel-2A MSI</p>
-                    <p>• Atmospheric corrections applied via split-window algorithm</p>
-                    <p className="italic text-[var(--alert-medium)] pt-1">
-                      ⚠ Demonstration dataset notice: figures presented reflect model simulations and illustrative samples.
-                    </p>
+                    {(selectedReport.content?.methodology ?? []).map(line => (
+                      <p key={line} className={line.startsWith('Note') || line.startsWith('Screening') ? 'italic text-[var(--alert-medium)] pt-1' : ''}>
+                        {line.startsWith('Note') || line.startsWith('Screening') ? `⚠ ${line}` : `• ${line}`}
+                      </p>
+                    ))}
                   </div>
                 </div>
               </div>
@@ -507,7 +561,7 @@ export default function ReportsPage() {
                         Select Monitored Zones to Include ({selectedZones.length} selected)
                       </label>
                       <div className="grid grid-cols-2 gap-2">
-                        {demoZones.map(z => {
+                        {zones.map(z => {
                           const isChecked = selectedZones.includes(z.name);
                           return (
                             <div
@@ -518,7 +572,12 @@ export default function ReportsPage() {
                                 isChecked ? 'border-[var(--accent)] bg-[var(--bg-card)]' : 'border-[var(--border)]'
                               )}
                             >
-                              <span className="font-medium text-[var(--text-primary)]">{z.name}</span>
+                              <span className="font-medium text-[var(--text-primary)]">
+                                {z.name}
+                                <span className="block text-[10px] font-normal text-[var(--text-muted)]">
+                                  {formatTemp(z.surfaceTemp)} · {z.vegetationCoverage}% veg · {z.severity}
+                                </span>
+                              </span>
                               {isChecked && <CheckCircle2 size={14} className="text-[var(--accent-green)]" />}
                             </div>
                           );
@@ -530,7 +589,22 @@ export default function ReportsPage() {
 
                 {wizardStep === 3 && (
                   <div className="space-y-4">
-                    <div className="grid grid-cols-2 gap-3">
+                    <label className="flex items-start gap-2 cursor-pointer p-3 rounded-xl border border-[var(--border)]">
+                      <input
+                        type="checkbox"
+                        checked={!customDates}
+                        onChange={e => setCustomDates(!e.target.checked)}
+                        className="accent-[var(--accent)] mt-0.5"
+                      />
+                      <span>
+                        <strong className="text-[var(--text-primary)]">Use the dashboard's latest imagery</strong>
+                        <span className="block text-[var(--text-muted)]">
+                          Scenes from {imageryDates.length ? `${formatDate(imageryDates[0])} to ${formatDate(imageryDates[imageryDates.length - 1])}` : 'the land-cover map'}.
+                          Untick to search a custom date range (re-runs the analysis, 10–30 s).
+                        </span>
+                      </span>
+                    </label>
+                    <div className={cn('grid grid-cols-2 gap-3', !customDates && 'opacity-50 pointer-events-none')}>
                       <div>
                         <label className="font-semibold text-[var(--text-secondary)] block mb-1">Start Date</label>
                         <input
@@ -552,15 +626,13 @@ export default function ReportsPage() {
                     </div>
 
                     <div className="p-4 rounded-xl bg-[var(--bg-card)] border border-[var(--border)] space-y-2">
-                      <p className="font-semibold text-[var(--text-primary)]">Available Satellite Datasets</p>
-                      <label className="flex items-center gap-2 cursor-pointer">
-                        <input type="checkbox" defaultChecked className="accent-[var(--accent)]" />
-                        <span>Sentinel-2A Multispectral MSI (10m spatial resolution)</span>
-                      </label>
-                      <label className="flex items-center gap-2 cursor-pointer">
-                        <input type="checkbox" defaultChecked className="accent-[var(--accent)]" />
-                        <span>Landsat-9 Thermal Infrared Sensor TIRS (30m resolution)</span>
-                      </label>
+                      <p className="font-semibold text-[var(--text-primary)]">Satellite Datasets Used</p>
+                      {[provenance.surfaceTemp.sensor, provenance.vegetation.sensor, provenance.landcover, provenance.population].map(source => (
+                        <p key={source} className="flex items-center gap-2">
+                          <CheckCircle2 size={13} className="text-[var(--accent-green)] shrink-0" />
+                          <span>{source}</span>
+                        </p>
+                      ))}
                     </div>
                   </div>
                 )}
@@ -571,14 +643,7 @@ export default function ReportsPage() {
                       Select Analytical Metrics for {selectedTemplate.title}
                     </p>
                     <div className="space-y-2">
-                      {[
-                        'Land Surface Temperature (LST) Mean & Maxima',
-                        'Normalized Difference Vegetation Index (NDVI)',
-                        'Thermal Heat Exposure Risk Quotient',
-                        'Impervious Surface & Albedo Factor',
-                        'Canopy Cover Deficit Against WHO 3-30-300 Target',
-                        'Tree Planting Feasibility Index',
-                      ].map(metric => {
+                      {[...selectedTemplate.defaultMetrics, ...EXTRA_METRICS].map(metric => {
                         const isSelected = selectedMetrics.includes(metric);
                         return (
                           <div
@@ -606,7 +671,7 @@ export default function ReportsPage() {
                     <h4 className="font-bold text-sm text-[var(--text-primary)]">Report Summary for Compilation</h4>
                     <p>• <strong>Template:</strong> {selectedTemplate.title}</p>
                     <p>• <strong>Region:</strong> {selectedLocation} ({selectedZones.join(', ')})</p>
-                    <p>• <strong>Date Range:</strong> {dateRange.start} to {dateRange.end}</p>
+                    <p>• <strong>Date Range:</strong> {customDates ? `${dateRange.start} to ${dateRange.end}` : "Dashboard's latest imagery"}</p>
                     <p>• <strong>Metrics:</strong> {selectedMetrics.length} selected analytical indices</p>
                     <p className="text-[var(--text-muted)] italic pt-2">
                       Ready to compile document. Generating will build the final report asset available for preview and CSV export.

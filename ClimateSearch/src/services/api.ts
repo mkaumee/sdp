@@ -34,9 +34,9 @@ export const api = {
     return body.places;
   },
 
-  /** Generate a report from the live analysis. */
+  /** Generate a report from the live analysis (a date range re-runs it on imagery from those dates). */
   createReport(area: AreaSelection, options: {
-    template: ReportType; zones: string[]; metrics: string[]; dateRange: { start: string; end: string }; reportLocation: string;
+    template: ReportType; zones: string[]; metrics: string[]; dateRange?: { start: string; end: string }; reportLocation: string;
   }) {
     return request<Report>('/api/reports', {
       method: 'POST',
