@@ -111,9 +111,13 @@ function cellIntel(c: AreaCell, data: AreaData): Intel {
     details: `Mostly ${c.mainCover}: ${c.builtPct}% built-up, ${c.treePct}% trees, ${c.barePct}% bare ground, `
       + `${c.waterPct}% water${c.people != null ? `, about ${c.people.toLocaleString()} residents` : ''}. `
       + (hot ? `Hotter than the hotspot threshold (${formatTemp(data.thresholds.hotspot)}).` : 'Below the hotspot threshold.'),
-    actions: c.openPct >= 10 && c.vegetationCoverage < 40
-      ? [`${c.openPct}% open ground could take new trees`, 'Shade streets and parking areas']
-      : c.vegetationCoverage >= 60 ? ['Protect this green cover — it cools its surroundings'] : ['Consider cool roofs and street trees'],
+    actions: c.vegetationCoverage >= 60
+      ? ['Protect this green cover — it cools its surroundings']
+      : c.openPct >= 10 && c.vegetationCoverage < 40
+        ? [`${c.openPct}% open ground could take new trees`, 'Shade streets and parking areas']
+        : c.builtPct >= 30
+          ? ['Consider cool roofs and street trees']
+          : ['Keep existing vegetation and watch for land clearing'],
     facts: [`NDVI ${c.ndvi ?? 'n/a'}`, `Priority ${c.priorityScore}/100`],
   };
 }
