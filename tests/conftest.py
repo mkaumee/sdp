@@ -8,6 +8,8 @@ import numpy as np  # noqa: E402  (imported after the path is set up)
 import pytest  # noqa: E402
 
 import datasources as ds  # noqa: E402
+import landsat  # noqa: E402
+import sentinel2  # noqa: E402
 
 POWER_SAMPLE = {  # shape of a NASA POWER climatology reply (values trimmed to what we read)
     "properties": {
@@ -43,3 +45,34 @@ def fake_data(monkeypatch):
     monkeypatch.setattr(ds, "read_elevation", elevation)
     monkeypatch.setattr(ds, "read_population", population)
     monkeypatch.setattr(ds, "read_climate", lambda lat, lon: ds.parse_power(POWER_SAMPLE))
+
+
+def landscape_lst(grid):
+    """Fake Landsat: town (east quarter) 41 °C, crops 34 °C, forest (west quarter) 30 °C, river 27 °C."""
+    n = grid.size
+    lst = np.full((n, n), 34.0, "float32")
+    lst[:, : n // 4] = 30.0
+    lst[:, n * 3 // 4:] = 41.0
+    lst[:, n // 2: n // 2 + 2] = 27.0
+    return {"lst": lst, "coverage": 1.0,
+            "scenes": [{"id": "LC09_x", "date": "2026-08-14", "platform": "Landsat 9", "cloud": 3}]}
+
+
+def landscape_ndvi(grid):
+    """Fake Sentinel-2 NDVI matching the same landscape."""
+    n = grid.size
+    ndvi = np.full((n, n), 0.6, "float32")
+    ndvi[:, : n // 4] = 0.85
+    ndvi[:, n * 3 // 4:] = 0.15
+    return {"ndvi": ndvi, "coverage": 1.0,
+            "scenes": [{"id": "S2C_x", "date": "2026-08-15", "platform": "Sentinel-2C", "cloud": 5}]}
+
+
+def unavailable(*args, **kwargs):
+    raise ds.DataUnavailable("blocked")
+
+
+@pytest.fixture
+def satellites(fake_data, monkeypatch):
+    monkeypatch.setattr(landsat, "read_lst", lambda grid, start=None, end=None: landscape_lst(grid))
+    monkeypatch.setattr(sentinel2, "read_ndvi", lambda grid, start=None, end=None: landscape_ndvi(grid))
