@@ -10,67 +10,45 @@ import { formatTimestamp } from '@/lib/utils';
 import type { ChatMessage } from '@/types';
 import toast from 'react-hot-toast';
 
-const INITIAL_DEMO_MESSAGES: ChatMessage[] = [
-  {
-    id: 'init-1',
-    role: 'user',
-    content: 'Show me the hottest satellite image of Lagos, Nigeria.',
-    timestamp: new Date(Date.now() - 1000 * 60 * 12),
-  },
-  {
-    id: 'init-2',
-    role: 'assistant',
-    content: 'Here is the latest satellite image of Lagos, Nigeria. The image was captured by Sentinel-2A, 10m resolution, updated 2 minutes ago.',
-    timestamp: new Date(Date.now() - 1000 * 60 * 12),
-    media: {
-      url: 'https://images.unsplash.com/photo-1524661135-423995f22d0b?auto=format&fit=crop&w=800&q=80',
-      caption: 'Lagos, Nigeria',
-      metadata: 'Sentinel-2A • 10m resolution',
-    },
-  },
-  {
-    id: 'init-3',
-    role: 'user',
-    content: 'Zoom in on the central business district.',
-    timestamp: new Date(Date.now() - 1000 * 60 * 10),
-  },
-  {
-    id: 'init-4',
-    role: 'assistant',
-    content: 'Here is a closer view of Lagos Central Business District.',
-    timestamp: new Date(Date.now() - 1000 * 60 * 10),
-    media: {
-      url: 'https://images.unsplash.com/photo-1477959858617-67f30bc75b82?auto=format&fit=crop&w=800&q=80',
-      caption: 'Lagos CBD',
-      metadata: 'Sentinel-2A • 10m resolution',
-    },
-  },
+const GENERAL_PROMPTS = [
+  'What causes the urban heat island effect?',
+  'What is NDVI and how is it used?',
+  'How does vegetation help reduce urban heat?',
+  'How can cities prioritize tree planting?',
 ];
 
-const SUGGESTED_PROMPTS = [
-  "Show me the hottest satellite image of Lagos, Nigeria.",
-  "Zoom in on the central business district.",
-  "What causes the urban heat island effect?",
-  "What is NDVI and how is it used?",
-  "How does vegetation help reduce urban heat?",
-  "Why is Central Walk a high priority?",
-  "How can cities prioritize tree planting?",
-];
+/** Prompts about the area being analysed (the first three are shown as chips). */
+function suggestedPrompts(area?: string, hotspot?: string) {
+  if (!area) return GENERAL_PROMPTS;
+  return [
+    `Show me the hottest satellite image of ${area}.`,
+    ...(hotspot ? [`Zoom in on ${hotspot}.`, `Why is ${hotspot} a high priority?`] : []),
+    ...GENERAL_PROMPTS,
+  ];
+}
+
+/** Bold (**text**) and italic (_text_) in the assistant's replies. */
+function inline(text: string) {
+  return text.split(/(\*\*.*?\*\*|(?<!\w)_.+?_(?!\w))/g).map((p, j) =>
+    p.startsWith('**') && p.endsWith('**') && p.length > 4
+      ? <strong key={j} className="font-bold text-[var(--text-primary)]">{p.slice(2, -2)}</strong>
+      : p.startsWith('_') && p.endsWith('_') && p.length > 2
+        ? <em key={j} className="text-[var(--text-muted)]">{p.slice(1, -1)}</em>
+        : p
+  );
+}
 
 function MarkdownText({ text }: { text: string }) {
   const lines = text.split('\n');
   return (
     <div className="space-y-1 text-xs">
       {lines.map((line, i) => {
-        const parts = line.split(/\*\*(.*?)\*\*/g);
-        const rendered = parts.map((p, j) =>
-          j % 2 === 1 ? <strong key={j} className="font-bold text-[var(--text-primary)]">{p}</strong> : p
-        );
+        const rendered = inline(line);
         if (line.startsWith('- ') || line.startsWith('• ')) {
           return (
             <div key={i} className="flex gap-2">
               <span className="shrink-0 text-[var(--accent-green)] font-bold">•</span>
-              <span>{rendered.slice(1)}</span>
+              <span>{inline(line.slice(2))}</span>
             </div>
           );
         }
@@ -84,22 +62,33 @@ function MarkdownText({ text }: { text: string }) {
 export function ChatPanel() {
   const {
     chatVisible, setChatVisible, chatMessages,
-    addChatMessage, updateChatMessage, clearChat, chatContext
+    addChatMessage, updateChatMessage, clearChat, chatContext,
+    area, areaData, areaStatus, responseStyle,
   } = useAppStore();
 
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [model, setModel] = useState<string | null>(null);  // who answered last: a Claude model or "offline"
+  const areaName = areaData?.area.name;
+  const prompts = suggestedPrompts(areaName, areaData?.hotspots[0]?.name);
+  const modelLabel = model === 'offline' ? 'Offline mode' : 'Claude Haiku';
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const userScrolled = useRef(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Initialize with the reference screenshot conversation if empty
+  // Start each conversation with a welcome for the area being analysed
   useEffect(() => {
-    if (chatMessages.length === 0) {
-      INITIAL_DEMO_MESSAGES.forEach(msg => addChatMessage(msg));
+    if (chatMessages.length === 0 && areaName) {
+      addChatMessage({
+        id: chatService.generateId(),
+        role: 'assistant',
+        content: `Hi! I'm the ClimateSmart AI assistant for **${areaName}**. Ask me about its heat hotspots, vegetation `
+          + 'or where to plant, and I can show you real Sentinel-2 satellite photos of any spot.',
+        timestamp: new Date(),
+      });
     }
-  }, [chatMessages.length, addChatMessage]);
+  }, [chatMessages.length, areaName, addChatMessage]);
 
   const scrollToBottom = useCallback((force = false) => {
     if (force || !userScrolled.current) {
@@ -117,7 +106,7 @@ export function ChatPanel() {
 
   const sendMessage = async (text?: string) => {
     const content = (text ?? input).trim();
-    if (!content || isLoading) return;
+    if (!content || isLoading || areaStatus === 'loading') return;
     setInput('');
     userScrolled.current = false;
 
@@ -142,15 +131,16 @@ export function ChatPanel() {
     setIsLoading(true);
 
     try {
-      const reply = await chatService.sendMessage(content, chatMessages, chatContext);
+      const reply = await chatService.sendMessage(content, chatMessages, chatContext, area, responseStyle);
+      setModel(reply.model);
       updateChatMessage(assistantId, {
         content: reply.text,
         media: reply.media,
         isLoading: false,
       });
-    } catch {
+    } catch (err) {
       updateChatMessage(assistantId, {
-        content: 'Sorry, the assistant is unavailable. Please try again.',
+        content: `Sorry, the assistant is unavailable: ${(err as Error).message}. Please try again.`,
         isLoading: false,
         hasError: true,
       });
@@ -191,8 +181,11 @@ export function ChatPanel() {
             </div>
 
             <div className="flex items-center gap-1">
-              <span className="text-[10px] px-1.5 py-0.5 rounded font-mono font-bold bg-[var(--bg-card)] text-[var(--text-muted)] border border-[var(--border)]">
-                AI Demo
+              <span
+                className="text-[10px] px-1.5 py-0.5 rounded font-mono font-bold bg-[var(--bg-card)] text-[var(--text-muted)] border border-[var(--border)]"
+                title={model === 'offline' ? 'No ANTHROPIC_API_KEY on the server: answers are built from the data' : 'Answers by Claude Haiku from the live analysis'}
+              >
+                {modelLabel}
               </span>
               <button
                 onClick={clearChat}
@@ -298,7 +291,7 @@ export function ChatPanel() {
 
           {/* Suggested Prompts Pill Section */}
           <div className="px-3 py-2 border-t border-[var(--border)] bg-[var(--bg-panel)] overflow-x-auto shrink-0 flex gap-1.5 scrollbar-none">
-            {SUGGESTED_PROMPTS.slice(0, 3).map(prompt => (
+            {prompts.slice(0, 3).map(prompt => (
               <button
                 key={prompt}
                 onClick={() => sendMessage(prompt)}
@@ -317,9 +310,9 @@ export function ChatPanel() {
                 value={input}
                 onChange={e => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="Ask about urban heat, NDVI, or map zones…"
+                placeholder={areaStatus === 'loading' ? 'Analysing the area…' : `Ask about ${areaName ?? 'urban heat'}, NDVI, or map zones…`}
                 rows={1}
-                disabled={isLoading}
+                disabled={isLoading || areaStatus === 'loading'}
                 className="flex-1 bg-transparent resize-none outline-none text-xs leading-relaxed max-h-24 overflow-y-auto text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
               />
               <button
@@ -336,7 +329,7 @@ export function ChatPanel() {
               </button>
             </div>
             <p className="text-[10px] text-center text-[var(--text-muted)] mt-1.5">
-              Enter to send · Shift+Enter for newline · Demo AI Mode
+              Enter to send · Shift+Enter for newline · {modelLabel} · {responseStyle} style
             </p>
           </div>
         </motion.aside>

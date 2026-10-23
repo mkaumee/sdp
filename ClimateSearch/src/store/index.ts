@@ -187,7 +187,7 @@ export const useAppStore = create<AppState>()(
       areaStatus: 'idle',
       areaError: null,
       setArea: (area) => {
-        set({ area, areaData: null });
+        set({ area, areaData: null, chatMessages: [] });  // a new place starts a new conversation
         get().loadArea();
       },
       loadArea: async () => {
