@@ -6,7 +6,8 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-export function formatTemp(value: number, units: 'metric' | 'imperial' = 'metric'): string {
+export function formatTemp(value: number | null | undefined, units: 'metric' | 'imperial' = 'metric'): string {
+  if (value === null || value === undefined) return '–';  // no temperature source was reachable
   if (units === 'imperial') {
     return `${((value * 9) / 5 + 32).toFixed(1)}°F`;
   }
@@ -43,6 +44,17 @@ export function formatDate(dateStr: string): string {
   } catch {
     return dateStr;
   }
+}
+
+/** "3.1885° N, 101.4930° E" */
+export function formatCoords(lat: number, lng: number, digits = 4): string {
+  return `${Math.abs(lat).toFixed(digits)}° ${lat >= 0 ? 'N' : 'S'}, ${Math.abs(lng).toFixed(digits)}° ${lng >= 0 ? 'E' : 'W'}`;
+}
+
+/** Average of the numbers that are present (null when there are none). */
+export function average(values: (number | null | undefined)[]): number | null {
+  const known = values.filter((v): v is number => typeof v === 'number');
+  return known.length ? known.reduce((a, b) => a + b, 0) / known.length : null;
 }
 
 export function formatTimestamp(date: Date): string {

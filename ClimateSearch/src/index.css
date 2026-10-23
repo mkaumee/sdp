@@ -233,4 +233,21 @@
   .leaflet-control-attribution a {
     color: #B7E65C !important;
   }
+
+  /* Label pins on the maps (components/map/MapLayers.tsx) */
+  .climate-pin {
+    background: transparent;
+    border: none;
+    width: auto !important;
+    height: auto !important;
+  }
+  .climate-pin-ping {
+    position: absolute;
+    inset: 0;
+    border-radius: 9999px;
+    animation: climate-ping 1.4s cubic-bezier(0, 0, 0.2, 1) infinite;
+  }
+  @keyframes climate-ping {
+    75%, 100% { transform: scale(2.2); opacity: 0; }
+  }
 }

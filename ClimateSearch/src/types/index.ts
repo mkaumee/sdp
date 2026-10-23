@@ -28,6 +28,10 @@ export interface ClimateZone {
   priorityScore: number;  // 0-100
   lastUpdated: string;  // ISO date
   dataSource: string;
+  bounds?: [[number, number], [number, number]];  // [[south, west], [north, east]]
+  builtPct?: number;
+  treePct?: number;
+  people?: number | null;
 }
 
 export interface Hotspot {
@@ -45,6 +49,9 @@ export interface Hotspot {
   contributing_factors: string[];
   mitigation_suggestions: string[];
   imageDate: string;
+  bounds?: [[number, number], [number, number]];
+  cells?: { row: number; col: number; bounds: [[number, number], [number, number]] }[];
+  people?: number | null;
 }
 
 export interface GreeningCandidate {
@@ -60,9 +67,11 @@ export interface GreeningCandidate {
   reasoning: string;
   recommendedAction: string;
   status: 'identified' | 'under-review' | 'approved' | 'in-progress' | 'completed';
-  nearestHotspotId?: string;
+  nearestHotspotId?: string | null;
   dataSource: string;
   lastUpdated: string;
+  interventionType?: string;
+  bounds?: [[number, number], [number, number]];
 }
 
 export interface ClimateMetric {
@@ -73,7 +82,7 @@ export interface ClimateMetric {
   trend?: 'up' | 'down' | 'stable';
   trendValue?: number;
   trendPeriod?: string;
-  severity?: Severity;
+  severity?: Severity | null;
   description: string;
   dataSource: string;
   isDemo: boolean;
@@ -128,6 +137,14 @@ export interface Report {
   metrics?: string[];
   description: string;
   dataSource: string;
+  content?: ReportContent;  // filled in by the backend when the report is generated
+}
+
+export interface ReportContent {
+  summary: string;
+  zones: { name: string; surfaceTemp: number | null; vegetationCoverage: number; severity: Severity; priorityScore: number }[];
+  metrics: { label: string; value: string; note: string | null }[];
+  methodology: string[];
 }
 
 export type ReportType =
@@ -167,3 +184,90 @@ export interface Notification {
   read: boolean;
   route?: string;
 }
+
+// ---------- Live analysis from the ClimateSmart AI backend (/api/area) ----------
+
+/** The place the dashboard is analysing. */
+export interface AreaSelection {
+  lat: number;
+  lng: number;
+  widthKm: number;
+  name?: string;  // short name, e.g. "Shah Alam" (the backend looks it up when missing)
+  location?: string;  // full name, e.g. "Shah Alam, Selangor, Malaysia"
+}
+
+export interface AreaInfo {
+  name: string;
+  location: string;
+  coordinates: LatLng;
+  widthKm: number;
+  cellKm: number;
+  bounds: BoundingBox;
+}
+
+/** Where a layer's numbers came from. */
+export interface SourceInfo {
+  kind: string;  // "landsat" | "estimate" | "none" | "sentinel2" | "worldcover"
+  label: string;  // short, e.g. "Landsat 9 thermal · 14 Aug 2026"
+  sensor: string;  // longer description
+  dates: string[];
+  note?: string | null;
+  isEstimate: boolean;
+}
+
+export interface Provenance {
+  surfaceTemp: SourceInfo;
+  vegetation: SourceInfo;
+  landcover: string;
+  population: string;
+  climate: string | null;
+  updated: string;  // newest imagery date
+  sensorsLabel: string;  // e.g. "Sentinel-2 & Landsat 9"
+}
+
+export interface MapOverlay {
+  url: string;  // PNG data URL
+  bounds: [[number, number], [number, number]];
+  min: number;
+  max: number;
+  unit: string;
+  label: string;
+}
+
+/** One cell of the analysis grid (for clicking anywhere on the map). */
+export interface AreaCell {
+  row: number;
+  col: number;
+  bounds: [[number, number], [number, number]];
+  center: LatLng;
+  surfaceTemp: number | null;
+  vegetationCoverage: number;
+  ndvi: number | null;
+  builtPct: number;
+  barePct: number;
+  treePct: number;
+  waterPct: number;
+  openPct: number;
+  people: number | null;
+  priorityScore: number;
+  severity: Severity;
+  mainCover: string;
+}
+
+export interface AreaData {
+  area: AreaInfo;
+  generatedAt: string;
+  metrics: ClimateMetric[];
+  zones: ClimateZone[];
+  hotspots: Hotspot[];
+  greeningCandidates: GreeningCandidate[];
+  cells: AreaCell[];
+  correlation: number | null;
+  thresholds: { hotspot: number | null; critical: number | null; tempMin: number | null; tempMax: number | null };
+  overlays: { temperature?: MapOverlay; vegetation?: MapOverlay };
+  notifications: (Omit<Notification, 'timestamp'> & { timestamp: string })[];
+  provenance: Provenance;
+  warnings: string[];
+}
+
+export type AssistantStyle = 'concise' | 'scientific' | 'strategic';

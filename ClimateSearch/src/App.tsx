@@ -45,8 +45,13 @@ function PageWrapper({ element, path }: { element: JSX.Element; path: string }) 
 }
 
 export default function App() {
-  const { theme, setTheme, setChatContext } = useAppStore();
+  const { theme, setTheme, setChatContext, areaData, areaStatus, loadArea } = useAppStore();
   const location = useLocation();
+
+  // Analyse the selected area (remembered from last time, or the default) as soon as the app opens
+  useEffect(() => {
+    if (!areaData && areaStatus === 'idle') loadArea();
+  }, [areaData, areaStatus, loadArea]);
 
   useEffect(() => {
     setTheme(theme);

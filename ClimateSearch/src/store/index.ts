@@ -12,8 +12,22 @@ import type {
   ClimateZone,
   Notification,
   SearchResult,
+  AreaSelection,
+  AreaData,
+  AssistantStyle,
+  Report,
 } from '@/types';
-import { demoNotifications } from '@/data/demo';
+import { api } from '@/services/api';
+
+// Area analysed when the app first opens: Shah Alam (Selangor, Malaysia), around the City of Elmina townships.
+export const DEFAULT_AREA: AreaSelection = { lat: 3.1885, lng: 101.493, widthKm: 10 };
+
+let inflight: AbortController | null = null;  // the area request in progress (a newer one cancels it)
+
+/** Map zoom that fits an area of this width (10 km -> 13). */
+export function zoomForWidth(widthKm: number) {
+  return Math.round(13 - Math.log2(widthKm / 10));
+}
 
 interface AppState {
   // Theme
@@ -69,6 +83,20 @@ interface AppState {
   // Preferences
   units: 'metric' | 'imperial';
   setUnits: (units: 'metric' | 'imperial') => void;
+
+  // Live analysis of the selected area (from the backend)
+  area: AreaSelection;
+  areaData: AreaData | null;
+  areaStatus: 'idle' | 'loading' | 'ready' | 'error';
+  areaError: string | null;
+  setArea: (area: AreaSelection) => void;
+  loadArea: () => Promise<void>;
+
+  // Assistant & reports
+  responseStyle: AssistantStyle;
+  setResponseStyle: (style: AssistantStyle) => void;
+  reports: Report[];
+  addReport: (report: Report) => void;
 }
 
 const DEFAULT_LAYERS: MapLayer[] = [
@@ -76,8 +104,8 @@ const DEFAULT_LAYERS: MapLayer[] = [
   { id: 'temperature', label: 'Surface Temperature', description: 'Heat overlay', enabled: true, opacity: 0.7 },
   { id: 'vegetation', label: 'Vegetation Index', description: 'NDVI overlay', enabled: false, opacity: 0.7 },
   { id: 'hotspots', label: 'Hotspot Markers', description: 'Hotspot locations', enabled: true, opacity: 1 },
-  { id: 'greenspaces', label: 'Parks & Green Spaces', description: 'Existing green spaces', enabled: false, opacity: 0.6 },
-  { id: 'boundaries', label: 'Admin Boundaries', description: 'Administrative boundaries', enabled: false, opacity: 0.5 },
+  { id: 'greenspaces', label: 'Parks & Green Spaces', description: 'Well-vegetated cells & greening sites', enabled: false, opacity: 0.6 },
+  { id: 'boundaries', label: 'Zone Boundaries', description: '3 × 3 analysis zones', enabled: false, opacity: 0.5 },
 ];
 
 export const useAppStore = create<AppState>()(
@@ -100,8 +128,8 @@ export const useAppStore = create<AppState>()(
       toggleSidebar: () => set(s => ({ sidebarCollapsed: !s.sidebarCollapsed })),
 
       // Map
-      mapCenter: { lat: 6.3244, lng: 3.3792 },
-      mapZoom: 12,
+      mapCenter: { lat: DEFAULT_AREA.lat, lng: DEFAULT_AREA.lng },
+      mapZoom: 13,
       setMapCenter: (center) => set({ mapCenter: center }),
       setMapZoom: (zoom) => set({ mapZoom: zoom }),
       setMapView: (center, zoom) => set({ mapCenter: center, mapZoom: zoom }),
@@ -135,7 +163,7 @@ export const useAppStore = create<AppState>()(
       setChatContext: (ctx) => set(s => ({ chatContext: { ...s.chatContext, ...ctx } })),
 
       // Notifications
-      notifications: demoNotifications,
+      notifications: [],
       markNotificationRead: (id) => set(s => ({
         notifications: s.notifications.map(n => n.id === id ? { ...n, read: true } : n)
       })),
@@ -152,6 +180,46 @@ export const useAppStore = create<AppState>()(
       // Preferences
       units: 'metric',
       setUnits: (units) => set({ units }),
+
+      // Live analysis
+      area: DEFAULT_AREA,
+      areaData: null,
+      areaStatus: 'idle',
+      areaError: null,
+      setArea: (area) => {
+        set({ area, areaData: null });
+        get().loadArea();
+      },
+      loadArea: async () => {
+        inflight?.abort();
+        const ctrl = new AbortController();
+        inflight = ctrl;
+        set({ areaStatus: 'loading', areaError: null });
+        try {
+          const data = await api.area(get().area, ctrl.signal);
+          if (ctrl.signal.aborted) return;
+          set({
+            areaData: data,
+            areaStatus: 'ready',
+            notifications: data.notifications.map(n => ({ ...n, timestamp: new Date(n.timestamp) })),
+            mapCenter: data.area.coordinates,
+            mapZoom: zoomForWidth(data.area.widthKm),
+            selectedHotspot: null,
+            selectedCandidate: null,
+            selectedZone: null,
+            chatContext: { ...get().chatContext, selectedLocation: data.area.name },
+          });
+        } catch (err) {
+          if (ctrl.signal.aborted) return;
+          set({ areaStatus: 'error', areaError: (err as Error).message });
+        }
+      },
+
+      // Assistant & reports
+      responseStyle: 'scientific',
+      setResponseStyle: (responseStyle) => set({ responseStyle }),
+      reports: [],
+      addReport: (report) => set(s => ({ reports: [report, ...s.reports] })),
     }),
     {
       name: 'climatesmart-prefs',
@@ -161,7 +229,19 @@ export const useAppStore = create<AppState>()(
         chatVisible: state.chatVisible,
         mapLayers: state.mapLayers,
         units: state.units,
+        area: state.area,
+        responseStyle: state.responseStyle,
+        reports: state.reports,
       }),
+      // Saved layers keep their on/off and opacity, but always take the current names and descriptions
+      merge: (persisted, current) => {
+        const saved = (persisted ?? {}) as Partial<AppState>;
+        const layers = DEFAULT_LAYERS.map(l => {
+          const old = saved.mapLayers?.find(x => x.id === l.id);
+          return old ? { ...l, enabled: old.enabled, opacity: old.opacity } : l;
+        });
+        return { ...current, ...saved, mapLayers: layers };
+      },
     }
   )
 );
