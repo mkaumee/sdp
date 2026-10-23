@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  MapContainer, TileLayer, CircleMarker, Popup
+  MapContainer, CircleMarker, Popup, Rectangle
 } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import {
@@ -10,27 +10,36 @@ import {
   TreePine, AlertCircle, Bookmark, BookmarkCheck, SlidersHorizontal
 } from 'lucide-react';
 import { useAppStore } from '@/store';
-import { demoGreeningCandidates, DEMO_CENTER, DEMO_LABEL } from '@/data/demo';
-import { cn, formatDate, getSeverityLabel } from '@/lib/utils';
-import type { GreeningCandidate } from '@/types';
+import { AreaGate } from '@/components/ui/AreaGate';
+import { AreaOutline, BaseTiles, FitBounds, areaBounds } from '@/components/map/MapLayers';
+import { cn, formatDate, formatTemp, getSeverityLabel } from '@/lib/utils';
+import type { AreaData, GreeningCandidate } from '@/types';
 import toast from 'react-hot-toast';
 
 export default function GreeningPage() {
+  return <AreaGate>{data => <Greening data={data} />}</AreaGate>;
+}
+
+function Greening({ data }: { data: AreaData }) {
   const {
     selectedCandidate, setSelectedCandidate,
     setChatContext, setChatVisible
   } = useAppStore();
+  const { area, zones, hotspots } = data;
 
-  const [candidates, setCandidates] = useState<GreeningCandidate[]>(demoGreeningCandidates);
+  // Sites found by the screening, plus projects proposed on this page
+  const [proposals, setProposals] = useState<GreeningCandidate[]>([]);
+  const candidates = useMemo(() => [...proposals, ...data.greeningCandidates], [proposals, data.greeningCandidates]);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [priorityFilter, setPriorityFilter] = useState<string>('all');
-  const [shortlist, setShortlist] = useState<string[]>(['g1', 'g3']);
+  const [shortlist, setShortlist] = useState<string[]>([]);
   const [showCreateModal, setShowCreateModal] = useState(false);
 
   // New project modal form state
   const [projectName, setProjectName] = useState('');
-  const [targetZone, setTargetZone] = useState('Lagos Island Corridor');
+  const [targetZone, setTargetZone] = useState(zones[0]?.id ?? '');
+  const [siteArea, setSiteArea] = useState('1');
   const [intervention, setIntervention] = useState('Urban Tree Canopy Planting');
   const [notes, setNotes] = useState('');
   const [formErrors, setFormErrors] = useState<{ name?: string }>({});
@@ -72,24 +81,28 @@ export default function GreeningPage() {
       return;
     }
 
+    // The proposal takes the measured conditions of the zone it targets
+    const zone = zones.find(z => z.id === targetZone) ?? zones[0];
     const newCandidate: GreeningCandidate = {
-      id: `g-${Date.now()}`,
+      id: `p-${Date.now()}`,
       name: projectName,
-      location: `${targetZone}, Lagos, Nigeria`,
-      coordinates: { lat: 6.45 + (Math.random() - 0.5) * 0.1, lng: 3.40 + (Math.random() - 0.5) * 0.1 },
-      currentVegetation: 14,
-      surfaceTemp: 35.5,
-      priorityScore: 86,
-      severity: 'high',
-      candidateArea: 4.5,
-      reasoning: notes || 'Prioritized community urban greening intervention initiated by city planner.',
+      location: zone.location,
+      coordinates: zone.coordinates,
+      currentVegetation: zone.vegetationCoverage,
+      surfaceTemp: zone.surfaceTemp,
+      priorityScore: zone.priorityScore,
+      severity: zone.severity,
+      candidateArea: Math.max(0.1, Number(siteArea) || 1),
+      reasoning: notes || `Proposed for ${zone.name}: ${formatTemp(zone.surfaceTemp)} surface temperature with ${zone.vegetationCoverage}% vegetation.`,
       recommendedAction: intervention,
       status: 'under-review',
-      dataSource: 'User Created Proposal · ClimateSmart AI',
+      dataSource: `User proposal · zone measurements from ${zone.dataSource}`,
       lastUpdated: new Date().toISOString().slice(0, 10),
+      interventionType: intervention,
+      bounds: zone.bounds,
     };
 
-    setCandidates([newCandidate, ...candidates]);
+    setProposals([newCandidate, ...proposals]);
     setSelectedCandidate(newCandidate);
     setShowCreateModal(false);
     setProjectName('');
@@ -101,6 +114,7 @@ export default function GreeningPage() {
   const handleAskAssistant = (c: GreeningCandidate) => {
     setChatContext({
       selectedLocation: c.location,
+      selectedCoordinates: c.coordinates,
       selectedCandidate: c.name,
       route: '/greening',
     });
@@ -116,7 +130,7 @@ export default function GreeningPage() {
           <div>
             <h2 className="text-2xl font-black text-[var(--text-primary)]">Greening Opportunities</h2>
             <p className="text-sm text-[var(--text-secondary)] mt-0.5">
-              Explore candidate locations where additional vegetation may improve urban climate resilience.
+              Explore candidate locations in {area.name} where additional vegetation may improve urban climate resilience.
             </p>
           </div>
           <button
@@ -143,7 +157,7 @@ export default function GreeningPage() {
               <TreePine size={16} className="text-[var(--accent)]" /> Total Candidate Area
             </div>
             <p className="text-2xl font-black text-[var(--accent)] my-1">{totalArea} ha</p>
-            <span className="text-[10px] text-[var(--text-muted)]">Estimated footprint</span>
+            <span className="text-[10px] text-[var(--text-muted)]">Estimated plantable footprint</span>
           </div>
 
           <div className="card p-4 flex flex-col justify-between">
@@ -166,15 +180,22 @@ export default function GreeningPage() {
         {/* Opportunity Map */}
         <div className="card overflow-hidden h-72 relative rounded-2xl border border-[var(--border)] shadow-md">
           <MapContainer
-            center={[DEMO_CENTER.lat, DEMO_CENTER.lng]}
-            zoom={11}
+            center={[area.coordinates.lat, area.coordinates.lng]}
+            zoom={12}
             style={{ height: '100%', width: '100%', background: '#07111F' }}
             scrollWheelZoom={false}
           >
-            <TileLayer
-              url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-              attribution='Esri Satellite'
-            />
+            <BaseTiles />
+            <FitBounds bounds={areaBounds(area)} />
+            <AreaOutline area={area} />
+            {candidates.map(gc => gc.bounds && (
+              <Rectangle
+                key={`b-${gc.id}`}
+                bounds={gc.bounds}
+                interactive={false}
+                pathOptions={{ color: '#B7E65C', weight: 1, dashArray: '4 4', fillOpacity: selectedCandidate?.id === gc.id ? 0.25 : 0.08 }}
+              />
+            ))}
             {candidates.map(gc => (
               <CircleMarker
                 key={gc.id}
@@ -204,6 +225,13 @@ export default function GreeningPage() {
           <div className="absolute top-3 left-3 z-[1000] px-3 py-1 rounded-xl bg-[var(--bg-panel)]/90 backdrop-blur-md border border-[var(--border)] text-xs text-[var(--text-secondary)]">
             Greening candidate markers • Click marker to inspect
           </div>
+          {candidates.length === 0 && (
+            <div className="absolute inset-0 z-[1000] flex items-center justify-center pointer-events-none">
+              <span className="px-4 py-2 rounded-xl bg-[var(--bg-panel)]/90 border border-[var(--border)] text-xs text-[var(--text-secondary)]">
+                No sites in {area.name} met the screening rules
+              </span>
+            </div>
+          )}
         </div>
 
         {/* Filter Toolbar */}
@@ -310,7 +338,7 @@ export default function GreeningPage() {
                     </div>
                     <div className="p-2 rounded-lg bg-[var(--bg-panel)] border border-[var(--border)]">
                       <span className="text-[10px] text-[var(--text-muted)] block">Surface Temp</span>
-                      <strong className="text-[var(--alert-high)] font-mono">{candidate.surfaceTemp}°C</strong>
+                      <strong className="text-[var(--alert-high)] font-mono">{formatTemp(candidate.surfaceTemp)}</strong>
                     </div>
                     <div className="p-2 rounded-lg bg-[var(--bg-panel)] border border-[var(--border)]">
                       <span className="text-[10px] text-[var(--text-muted)] block">Area</span>
@@ -422,16 +450,40 @@ export default function GreeningPage() {
                       <span className="text-[var(--accent-green)] font-bold">✓</span>
                       <span>{selectedCandidate.recommendedAction}</span>
                     </div>
-                    <div className="flex items-start gap-2">
-                      <span className="text-[var(--accent-green)] font-bold">✓</span>
-                      <span>Permeable pavement & rain garden bioswales along access paths</span>
-                    </div>
+                    {selectedCandidate.interventionType && (
+                      <div className="flex items-start gap-2">
+                        <span className="text-[var(--accent-green)] font-bold">✓</span>
+                        <span>Intervention type: {selectedCandidate.interventionType}</span>
+                      </div>
+                    )}
+                    {(() => {
+                      const hs = hotspots.find(h => h.id === selectedCandidate.nearestHotspotId);
+                      return hs ? (
+                        <div className="flex items-start gap-2">
+                          <span className="text-[var(--accent-green)] font-bold">✓</span>
+                          <span>Cools the nearest heat hotspot: {hs.name} ({formatTemp(hs.surfaceTemp)})</span>
+                        </div>
+                      ) : null;
+                    })()}
+                  </div>
+                </div>
+
+                {/* Measured conditions */}
+                <div className="grid grid-cols-2 gap-2.5">
+                  <div className="card p-3 rounded-xl bg-[var(--bg-card)] border border-[var(--border)]">
+                    <span className="text-[10px] text-[var(--text-muted)] uppercase tracking-wide block">Surface Temp</span>
+                    <span className="text-lg font-black text-[var(--alert-high)]">{formatTemp(selectedCandidate.surfaceTemp)}</span>
+                  </div>
+                  <div className="card p-3 rounded-xl bg-[var(--bg-card)] border border-[var(--border)]">
+                    <span className="text-[10px] text-[var(--text-muted)] uppercase tracking-wide block">Vegetation</span>
+                    <span className="text-lg font-black text-[var(--accent-green)]">{selectedCandidate.currentVegetation}%</span>
                   </div>
                 </div>
 
                 {/* Data disclaimer */}
                 <div className="p-3 rounded-xl bg-[var(--bg-card)] border border-[var(--border)] text-[11px] text-[var(--text-muted)] space-y-1">
                   <p>Status: <strong className="text-[var(--text-secondary)] capitalize">{selectedCandidate.status.replace('-', ' ')}</strong></p>
+                  <p>Source: <strong className="text-[var(--text-secondary)]">{selectedCandidate.dataSource}</strong> · {formatDate(selectedCandidate.lastUpdated)}</p>
                   <p className="italic text-[var(--alert-medium)] pt-0.5">
                     ⚠ Environmental benefit calculations represent estimated potential under standard canopy models. Ground-truthing required.
                   </p>
@@ -487,7 +539,7 @@ export default function GreeningPage() {
                     type="text"
                     value={projectName}
                     onChange={e => { setProjectName(e.target.value); setFormErrors({}); }}
-                    placeholder="e.g. Lagos Marina Shaded Promenade"
+                    placeholder={`e.g. ${area.name} Shaded Promenade`}
                     className="input-base"
                   />
                   {formErrors.name && (
@@ -504,12 +556,26 @@ export default function GreeningPage() {
                     onChange={e => setTargetZone(e.target.value)}
                     className="input-base"
                   >
-                    <option value="Lagos Island Corridor">Lagos Island Corridor</option>
-                    <option value="Ikeja Industrial Zone">Ikeja Industrial Zone</option>
-                    <option value="Victoria Island District">Victoria Island District</option>
-                    <option value="Surulere Residential">Surulere Residential</option>
-                    <option value="Agege Market Sector">Agege Market Sector</option>
+                    {zones.map(z => (
+                      <option key={z.id} value={z.id}>
+                        {z.name} — {formatTemp(z.surfaceTemp)}, {z.vegetationCoverage}% vegetation
+                      </option>
+                    ))}
                   </select>
+                </div>
+
+                <div>
+                  <label className="font-semibold text-[var(--text-secondary)] block mb-1">
+                    Site Area (ha)
+                  </label>
+                  <input
+                    type="number"
+                    min="0.1"
+                    step="0.1"
+                    value={siteArea}
+                    onChange={e => setSiteArea(e.target.value)}
+                    className="input-base"
+                  />
                 </div>
 
                 <div>
