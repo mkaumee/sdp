@@ -1,9 +1,11 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
+import { MapContainer, Marker } from 'react-leaflet';
+import 'leaflet/dist/leaflet.css';
 import {
   Thermometer, Leaf, Flame, MapPin, ArrowRight,
-  TrendingUp, TrendingDown, Map as MapIcon, Info, ExternalLink,
+  TrendingUp, TrendingDown, Map as MapIcon, Info, AlertTriangle,
   Layers, Maximize2
 } from 'lucide-react';
 import {
@@ -11,11 +13,13 @@ import {
   Tooltip, ResponsiveContainer, Cell
 } from 'recharts';
 import { useAppStore } from '@/store';
+import { AreaGate } from '@/components/ui/AreaGate';
+import { SourceBadge } from '@/components/ui/SourceBadge';
 import {
-  demoMetrics, demoZones, demoHotspots, temperatureVsVegetationData, DEMO_LABEL
-} from '@/data/demo';
-import { cn, formatTemp, formatDate, getSeverityLabel } from '@/lib/utils';
-import type { ClimateZone } from '@/types';
+  AreaOutline, BaseTiles, DataOverlay, FitBounds, HEAT_GRADIENT, VEG_GRADIENT, areaBounds, pinIcon,
+} from '@/components/map/MapLayers';
+import { cn, formatTemp, formatDate, formatCoords, getSeverityLabel } from '@/lib/utils';
+import type { AreaData, ClimateZone, Hotspot } from '@/types';
 
 const SEV_COLORS: Record<string, string> = {
   high: '#F05252',
@@ -69,9 +73,24 @@ function PriorityBadge({ severity }: { severity: string }) {
 }
 
 export default function OverviewPage() {
+  return <AreaGate>{data => <Overview data={data} />}</AreaGate>;
+}
+
+function Overview({ data }: { data: AreaData }) {
   const navigate = useNavigate();
-  const { setSelectedZone, setSelectedHotspot, setMapView, setChatContext, setChatVisible } = useAppStore();
+  const { setSelectedZone, setSelectedHotspot, setSelectedCandidate, setMapView, setChatContext, setChatVisible } = useAppStore();
   const [mapMode, setMapMode] = useState<'heat' | 'vegetation'>('heat');
+  const { area, provenance, zones, hotspots, greeningCandidates, metrics } = data;
+  const coords = formatCoords(area.coordinates.lat, area.coordinates.lng);
+  const overlay = mapMode === 'heat' ? data.overlays.temperature : data.overlays.vegetation;
+  const topCandidate = greeningCandidates[0];
+
+  // Scatter points: one per compass zone that has a temperature reading.
+  const scatterData = zones
+    .filter(z => z.surfaceTemp !== null)
+    .map(z => ({ name: z.name, temperature: z.surfaceTemp as number, vegetation: z.vegetationCoverage, severity: z.severity }));
+  const temps = scatterData.map(d => d.temperature);
+  const tempDomain = temps.length ? [Math.floor(Math.min(...temps)) - 1, Math.ceil(Math.max(...temps)) + 1] : [25, 40];
 
   const metricIcons = [
     { icon: <Thermometer size={20} />, color: 'var(--alert-high)', bg: 'rgba(240, 82, 82, 0.1)' },
@@ -80,7 +99,8 @@ export default function OverviewPage() {
     { icon: <MapPin size={20} />, color: 'var(--info)', bg: 'rgba(92, 167, 255, 0.1)' },
   ];
 
-  const topHotspots = demoHotspots.filter(h => h.severity === 'high').slice(0, 3);
+  const urgent = hotspots.filter(h => h.severity === 'high');
+  const topHotspots = (urgent.length ? urgent : hotspots).slice(0, 3);
 
   const handleZoneClick = (zone: ClimateZone) => {
     setSelectedZone(zone);
@@ -88,14 +108,15 @@ export default function OverviewPage() {
     navigate('/map-explorer');
   };
 
-  const handleOpenHotspot = (hs: typeof demoHotspots[0]) => {
+  const handleOpenHotspot = (hs: Hotspot) => {
     setSelectedHotspot(hs);
     navigate('/hotspots');
   };
 
   const handleAskAssistant = (topic: string) => {
     setChatContext({
-      selectedLocation: 'Lagos, Nigeria',
+      selectedLocation: area.name,
+      selectedCoordinates: area.coordinates,
       selectedHotspot: topic,
       route: '/overview',
     });
@@ -120,7 +141,7 @@ export default function OverviewPage() {
             <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full text-xs font-medium"
               style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}>
               <span className="w-2 h-2 rounded-full animate-pulse" style={{ background: 'var(--accent)' }} />
-              Active Analysis Area: <strong className="text-[var(--text-primary)]">Lagos Metropolitan Region</strong>
+              Active Analysis Area: <strong className="text-[var(--text-primary)]">{area.location}</strong>
             </div>
             <h2 className="text-2xl lg:text-3xl font-extrabold tracking-tight text-[var(--text-primary)]">
               See the heat. <span style={{ color: 'var(--accent-green)' }}>Find room for green.</span>
@@ -130,15 +151,19 @@ export default function OverviewPage() {
             </p>
             <div className="flex flex-wrap items-center gap-3 pt-1 text-xs text-[var(--text-muted)]">
               <span className="flex items-center gap-1">
-                <MapPin size={13} style={{ color: 'var(--accent)' }} /> 6.3244° N, 3.3792° E
+                <MapPin size={13} style={{ color: 'var(--accent)' }} /> {coords}
               </span>
               <span>•</span>
-              <span>Updated: {formatDate('2024-09-15')} (Sentinel-2 & Landsat-9)</span>
+              <span>Updated: {formatDate(provenance.updated)} ({provenance.sensorsLabel})</span>
               <span>•</span>
-              <span className="text-[11px] px-2 py-0.5 rounded font-semibold text-[var(--alert-medium)] bg-[var(--alert-medium)] bg-opacity-15 border border-[var(--alert-medium)] border-opacity-30">
-                ⚠ {DEMO_LABEL}
-              </span>
+              <SourceBadge source={provenance.surfaceTemp} />
+              <SourceBadge source={provenance.vegetation} />
             </div>
+            {data.warnings.length > 0 && (
+              <p className="flex items-center gap-1.5 text-[11px] text-[var(--alert-medium)]">
+                <AlertTriangle size={12} /> {data.warnings.join(' · ')}
+              </p>
+            )}
           </div>
 
           <div className="flex items-center gap-3 shrink-0">
@@ -161,7 +186,7 @@ export default function OverviewPage() {
 
       {/* 4 KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {demoMetrics.map((metric, i) => (
+        {metrics.map((metric, i) => (
           <motion.div
             key={metric.id}
             initial={{ opacity: 0, y: 12 }}
@@ -225,7 +250,9 @@ export default function OverviewPage() {
               ) : (
                 <span className="text-[var(--text-muted)]">At current thresholds</span>
               )}
-              <span className="text-[10px] text-[var(--text-muted)] italic">Sample data</span>
+              <span className="text-[10px] text-[var(--text-muted)] italic truncate max-w-[55%] text-right" title={metric.dataSource}>
+                {metric.dataSource}
+              </span>
             </div>
           </motion.div>
         ))}
@@ -245,7 +272,7 @@ export default function OverviewPage() {
               <div className="flex items-center gap-2">
                 <h3 className="text-base font-bold text-[var(--text-primary)]">Township Climate Map</h3>
                 <span className="text-[11px] px-2 py-0.5 rounded font-medium bg-[var(--bg-card)] border border-[var(--border)] text-[var(--text-muted)]">
-                  Lagos Metro
+                  {area.name}
                 </span>
               </div>
               <p className="text-xs text-[var(--text-muted)] mt-0.5">Heat and vegetation coverage by urban zone</p>
@@ -290,121 +317,64 @@ export default function OverviewPage() {
             </div>
           </div>
 
-          {/* Map canvas container matching visual reference */}
-          <div className="relative rounded-2xl overflow-hidden border border-[var(--border)] bg-[#07111F] min-h-[340px] flex items-center justify-center shadow-inner group">
-            {/* Satellite Background Simulation with coastal contours */}
-            <div
-              className="absolute inset-0 bg-cover bg-center opacity-85 transition-transform duration-700 group-hover:scale-105"
-              style={{
-                backgroundImage: `radial-gradient(circle at 40% 50%, rgba(13, 27, 42, 0.4) 0%, rgba(7, 17, 31, 0.85) 100%), url('https://images.unsplash.com/photo-1524661135-423995f22d0b?auto=format&fit=crop&w=1200&q=80')`,
-              }}
-            />
-
-            {/* Heat or Vegetation Glowing Blobs */}
-            <div className="absolute inset-0 pointer-events-none">
-              {mapMode === 'heat' ? (
-                <>
-                  {/* High heat core */}
-                  <div
-                    className="absolute top-[28%] left-[32%] w-36 h-36 rounded-full blur-2xl opacity-75"
-                    style={{ background: 'radial-gradient(circle, rgba(240,82,82,0.9) 0%, rgba(244,185,66,0.4) 60%, transparent 80%)' }}
-                  />
-                  {/* Secondary heat core */}
-                  <div
-                    className="absolute top-[42%] left-[55%] w-32 h-32 rounded-full blur-2xl opacity-70"
-                    style={{ background: 'radial-gradient(circle, rgba(244,185,66,0.85) 0%, rgba(240,82,82,0.3) 65%, transparent 80%)' }}
-                  />
-                  {/* Tertiary heat core */}
-                  <div
-                    className="absolute top-[55%] left-[40%] w-28 h-28 rounded-full blur-xl opacity-65"
-                    style={{ background: 'radial-gradient(circle, rgba(240,82,82,0.75) 0%, transparent 70%)' }}
-                  />
-                </>
-              ) : (
-                <>
-                  {/* High vegetation clusters */}
-                  <div
-                    className="absolute top-[30%] left-[25%] w-40 h-40 rounded-full blur-2xl opacity-70"
-                    style={{ background: 'radial-gradient(circle, rgba(69,184,129,0.85) 0%, rgba(183,230,92,0.4) 60%, transparent 80%)' }}
-                  />
-                  <div
-                    className="absolute top-[50%] left-[65%] w-36 h-36 rounded-full blur-2xl opacity-65"
-                    style={{ background: 'radial-gradient(circle, rgba(114,200,91,0.8) 0%, transparent 70%)' }}
-                  />
-                </>
+          {/* Map canvas: satellite base map with the measured heat or vegetation layer on top */}
+          <div className="relative rounded-2xl overflow-hidden border border-[var(--border)] bg-[#07111F] h-[340px] shadow-inner">
+            <MapContainer
+              center={[area.coordinates.lat, area.coordinates.lng]}
+              zoom={12}
+              zoomControl={false}
+              scrollWheelZoom={false}
+              attributionControl={false}
+              style={{ height: '100%', width: '100%', background: '#07111F' }}
+            >
+              <FitBounds bounds={areaBounds(area)} />
+              <BaseTiles />
+              <DataOverlay overlay={overlay} opacity={0.7} />
+              <AreaOutline area={area} />
+              {topHotspots[0] && (
+                <Marker
+                  position={[topHotspots[0].coordinates.lat, topHotspots[0].coordinates.lng]}
+                  icon={pinIcon('heat', 'High Temperature Zone', `${formatTemp(topHotspots[0].surfaceTemp)} · ${topHotspots[0].name}`, true)}
+                  eventHandlers={{ click: () => handleOpenHotspot(topHotspots[0]) }}
+                />
               )}
-            </div>
-
-            {/* Interactive Location Marker Badges (exactly like design reference) */}
-            <div className="absolute top-[26%] left-[33%] z-10 animate-bounce transition-transform hover:scale-105">
-              <div
-                onClick={() => handleOpenHotspot(demoHotspots[0])}
-                className="cursor-pointer flex items-center gap-2 px-3 py-1.5 rounded-xl shadow-2xl border backdrop-blur-md"
-                style={{
-                  background: 'rgba(13, 27, 42, 0.88)',
-                  borderColor: 'rgba(240, 82, 82, 0.6)',
-                  color: '#FFFFFF',
-                }}
-              >
-                <span className="w-2.5 h-2.5 rounded-full bg-[#F05252] animate-ping" />
-                <Thermometer size={14} className="text-[#F05252]" />
-                <div className="text-left">
-                  <p className="text-[11px] font-bold leading-none">High Temperature Zone</p>
-                  <p className="text-[10px] text-red-300 font-semibold mt-0.5">36.2°C · Central Walk</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="absolute top-[48%] left-[58%] z-10 transition-transform hover:scale-105">
-              <div
-                onClick={() => navigate('/greening')}
-                className="cursor-pointer flex items-center gap-2 px-3 py-1.5 rounded-xl shadow-2xl border backdrop-blur-md"
-                style={{
-                  background: 'rgba(13, 27, 42, 0.88)',
-                  borderColor: 'rgba(183, 230, 92, 0.6)',
-                  color: '#FFFFFF',
-                }}
-              >
-                <Leaf size={14} className="text-[#B7E65C]" />
-                <div className="text-left">
-                  <p className="text-[11px] font-bold leading-none">Low Vegetation</p>
-                  <p className="text-[10px] text-lime-300 font-semibold mt-0.5">11% · Greening Candidate</p>
-                </div>
-              </div>
-            </div>
+              {topCandidate && (
+                <Marker
+                  position={[topCandidate.coordinates.lat, topCandidate.coordinates.lng]}
+                  icon={pinIcon('green', 'Low Vegetation', `${topCandidate.currentVegetation}% · Greening Candidate`)}
+                  eventHandlers={{ click: () => { setSelectedCandidate(topCandidate); navigate('/greening'); } }}
+                />
+              )}
+            </MapContainer>
 
             {/* Bottom Left Coordinate Pill */}
-            <div className="absolute bottom-3 left-3 z-10">
+            <div className="absolute bottom-3 left-3 z-[400] pointer-events-none">
               <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-[11px] font-medium bg-[#091522]/90 text-slate-200 border border-slate-700 backdrop-blur-md">
                 <MapPin size={13} className="text-[#B7E65C]" />
-                <span>6.3244° N, 3.3792° E</span>
+                <span>{coords}</span>
                 <span className="text-slate-500">•</span>
-                <span className="text-slate-400">Lagos, Nigeria</span>
+                <span className="text-slate-400">{area.widthKm} km area</span>
               </div>
             </div>
 
             {/* Bottom Right Heat / Veg Scale */}
-            <div className="absolute bottom-3 right-3 z-10">
-              <div className="flex items-center gap-3 px-3 py-1.5 rounded-xl text-[11px] bg-[#091522]/90 text-slate-200 border border-slate-700 backdrop-blur-md">
-                <span className="text-[10px] font-mono font-bold text-slate-300">28°C</span>
-                <div
-                  className="w-20 h-2.5 rounded-full"
-                  style={{
-                    background: mapMode === 'heat'
-                      ? 'linear-gradient(to right, #45B881, #F4B942, #F05252)'
-                      : 'linear-gradient(to right, #DFE7EF, #72C85B, #237A53)',
-                  }}
-                />
-                <span className="text-[10px] font-mono font-bold text-slate-300">
-                  {mapMode === 'heat' ? '40°C' : '100%'}
-                </span>
+            {overlay && (
+              <div className="absolute bottom-3 right-3 z-[400] pointer-events-none">
+                <div className="flex items-center gap-3 px-3 py-1.5 rounded-xl text-[11px] bg-[#091522]/90 text-slate-200 border border-slate-700 backdrop-blur-md">
+                  <span className="text-[10px] font-mono font-bold text-slate-300">{overlay.min}{overlay.unit === '°C' ? '°C' : ''}</span>
+                  <div className="w-20 h-2.5 rounded-full" style={{ background: mapMode === 'heat' ? HEAT_GRADIENT : VEG_GRADIENT }} />
+                  <span className="text-[10px] font-mono font-bold text-slate-300">
+                    {overlay.max}{overlay.unit === '°C' ? '°C' : overlay.unit === '%' ? '%' : ''} {overlay.unit === 'NDVI' ? 'NDVI' : ''}
+                  </span>
+                </div>
               </div>
-            </div>
+            )}
           </div>
 
           <div className="flex items-center justify-between text-xs pt-1 text-[var(--text-muted)]">
             <span className="flex items-center gap-1.5">
               <Layers size={13} /> Showing {mapMode === 'heat' ? 'Land Surface Temperature (LST)' : 'Normalized Difference Vegetation (NDVI)'}
+              {overlay && <span className="hidden sm:inline">· {overlay.label}</span>}
             </span>
             <button
               onClick={() => navigate('/map-explorer')}
@@ -429,11 +399,16 @@ export default function OverviewPage() {
                 <p className="text-xs text-[var(--text-muted)] mt-0.5">Rule-based screening, not a final decision</p>
               </div>
               <span className="badge-high text-xs px-2 py-0.5 rounded-full font-bold">
-                {topHotspots.length} Urgent
+                {urgent.length} Urgent
               </span>
             </div>
 
             <div className="mt-4 space-y-2.5">
+              {topHotspots.length === 0 && (
+                <p className="text-xs text-[var(--text-muted)] p-3 rounded-xl bg-[var(--bg-card)] border border-[var(--border)]">
+                  No heat hotspots stand out in {area.name} at current thresholds.
+                </p>
+              )}
               {topHotspots.map(hs => (
                 <div
                   key={hs.id}
@@ -448,7 +423,7 @@ export default function OverviewPage() {
                       <PriorityBadge severity={hs.severity} />
                     </div>
                     <p className="text-xs text-[var(--text-secondary)]">
-                      <span className="font-semibold text-[var(--alert-high)]">{hs.surfaceTemp}°C</span>
+                      <span className="font-semibold text-[var(--alert-high)]">{formatTemp(hs.surfaceTemp)}</span>
                       <span className="text-[var(--text-muted)]"> · </span>
                       <span>{hs.vegetationCoverage}% vegetation</span>
                     </p>
@@ -492,7 +467,7 @@ export default function OverviewPage() {
                 <h3 className="text-base font-bold text-[var(--text-primary)]">Temperature vs. Vegetation</h3>
                 <p className="text-xs text-[var(--text-muted)]">Hot and bare zones sit top-left</p>
               </div>
-              <span className="text-[10px] text-[var(--text-muted)] italic">Sample data</span>
+              <span className="text-[10px] text-[var(--text-muted)] italic">{zones.length} zones · {provenance.surfaceTemp.label}</span>
             </div>
 
             <div className="h-64 w-full pt-2">
@@ -511,14 +486,14 @@ export default function OverviewPage() {
                   <YAxis
                     dataKey="temperature"
                     name="Temperature"
-                    domain={[25, 40]}
+                    domain={tempDomain}
                     tick={{ fontSize: 11, fill: 'var(--text-muted)' }}
                     unit="°C"
                     label={{ value: 'Surface Temp (°C)', angle: -90, position: 'insideLeft', style: { fontSize: 11, fill: 'var(--text-muted)' } }}
                   />
                   <Tooltip content={<ScatterTooltip />} />
-                  <Scatter data={temperatureVsVegetationData}>
-                    {temperatureVsVegetationData.map((entry, index) => (
+                  <Scatter data={scatterData}>
+                    {scatterData.map((entry, index) => (
                       <Cell
                         key={index}
                         fill={SEV_COLORS[entry.severity] || '#F05252'}
@@ -538,7 +513,10 @@ export default function OverviewPage() {
               <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-[#F4B942]" /> Moderate</span>
               <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-[#45B881]" /> Low risk</span>
             </div>
-            <span>Negative correlation r = -0.87</span>
+            <span title="Pearson correlation across every grid cell">
+              {data.correlation === null ? 'Correlation n/a'
+                : `${data.correlation < 0 ? 'Negative' : 'Positive'} correlation r = ${data.correlation.toFixed(2)}`}
+            </span>
           </div>
         </motion.div>
 
@@ -570,7 +548,7 @@ export default function OverviewPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[var(--border)]">
-                  {demoZones.map(zone => (
+                  {zones.map(zone => (
                     <tr
                       key={zone.id}
                       onClick={() => handleZoneClick(zone)}
@@ -581,7 +559,7 @@ export default function OverviewPage() {
                         <span className="block text-[10px] font-normal text-[var(--text-muted)]">{zone.location}</span>
                       </td>
                       <td className="px-4 py-3 font-mono font-medium text-[var(--text-primary)]">
-                        {zone.surfaceTemp}°C
+                        {formatTemp(zone.surfaceTemp)}
                       </td>
                       <td className="px-4 py-3 font-mono text-[var(--text-secondary)]">
                         {zone.vegetationCoverage}%
@@ -602,7 +580,7 @@ export default function OverviewPage() {
           </div>
 
           <div className="p-4 border-t border-[var(--border)] flex items-center justify-between text-xs text-[var(--text-muted)]">
-            <span>Showing all 6 illustrative pilot zones</span>
+            <span>Showing all {zones.length} compass zones of {area.name}</span>
             <button
               onClick={() => navigate('/hotspots')}
               className="font-semibold text-[var(--accent-green)] hover:underline flex items-center gap-1"
