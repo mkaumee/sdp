@@ -115,7 +115,8 @@ def scene_metadata(scene):
         **scene,
         "cloud": float(props.get("eo:cloud_cover", 100)),  # % of the whole tile under cloud
         "platform": "Sentinel-" + str(props.get("platform", "sentinel-2")).split("-")[-1].upper(),  # e.g. Sentinel-2C
-        "offset": 1000 if baseline >= 4 else 0,  # since 2022 the stored numbers carry +1000
+        # Since 2022 ESA stores reflectance with +1000 added; this archive usually removes it already.
+        "offset": 0 if props.get("earthsearch:boa_offset_applied") else 1000 if baseline >= 4 else 0,
     }
 
 

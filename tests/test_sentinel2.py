@@ -50,6 +50,9 @@ def test_scene_metadata_reads_cloud_and_offset(monkeypatch):
     monkeypatch.setattr(s2.requests, "get", lambda *a, **k: FakeResponse(payload))
     meta = s2.scene_metadata({"prefix": "p/", "id": "S2C_47NQD_20260924_0_L2A", "date": "2026-09-24"})
     assert meta["cloud"] == 12.5 and meta["platform"] == "Sentinel-2C" and meta["offset"] == 1000
+    payload["properties"]["earthsearch:boa_offset_applied"] = True  # the archive already removed it
+    assert s2.scene_metadata({"prefix": "p/", "id": "x", "date": "2026-09-24"})["offset"] == 0
+    del payload["properties"]["earthsearch:boa_offset_applied"]
     payload["properties"]["s2:processing_baseline"] = "03.01"  # before 2022: no offset
     assert s2.scene_metadata({"prefix": "p/", "id": "x", "date": "2021-01-01"})["offset"] == 0
 
