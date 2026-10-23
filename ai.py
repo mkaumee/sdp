@@ -24,9 +24,10 @@ MAX_MESSAGE_CHARS = 4000  # longest single chat message accepted
 class AIError(Exception):
     """A problem worth showing to the user, with the HTTP status to send."""
 
-    def __init__(self, message, status=502):
+    def __init__(self, message, status=502, no_key=False):
         super().__init__(message)
         self.status = status
+        self.no_key = no_key  # True when Claude isn't set up at all (callers may offer an offline answer)
 
 
 def _ask(beta=False, **request):
@@ -38,9 +39,10 @@ def _ask(beta=False, **request):
     except TypeError as err:
         if "authentication" not in str(err).lower():  # a real programming error: don't hide it
             raise
-        raise AIError("Claude features are off: set the ANTHROPIC_API_KEY environment variable and restart app.py.", 503)
+        raise AIError("Claude features are off: set the ANTHROPIC_API_KEY environment variable and restart app.py.", 503,
+                      no_key=True)
     except anthropic.AuthenticationError:
-        raise AIError("The ANTHROPIC_API_KEY was rejected. Check the key and restart app.py.", 503)
+        raise AIError("The ANTHROPIC_API_KEY was rejected. Check the key and restart app.py.", 503, no_key=True)
     except anthropic.RateLimitError:
         raise AIError("Claude is busy (rate limited). Try again in a minute.", 503)
     except anthropic.APIStatusError as err:
