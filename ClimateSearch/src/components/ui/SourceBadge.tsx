@@ -9,10 +9,8 @@ export function SourceBadge({ source, className }: { source: SourceInfo; classNa
     <span
       title={[source.sensor, source.note].filter(Boolean).join(' — ')}
       className={cn(
-        'inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded font-semibold border',
-        estimate
-          ? 'text-[var(--alert-medium)] bg-[var(--alert-medium)] bg-opacity-15 border-[var(--alert-medium)] border-opacity-30'
-          : 'text-[var(--alert-low)] bg-[var(--alert-low)] bg-opacity-15 border-[var(--alert-low)] border-opacity-30',
+        estimate ? 'badge-medium' : 'badge-low',  // tinted background, same as the severity badges
+        'inline-flex items-center gap-1 !text-[11px] font-semibold',
         className,
       )}
     >

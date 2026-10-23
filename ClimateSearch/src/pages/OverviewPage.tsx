@@ -398,7 +398,7 @@ function Overview({ data }: { data: AreaData }) {
                 <h3 className="text-base font-bold text-[var(--text-primary)]">Priority Signals</h3>
                 <p className="text-xs text-[var(--text-muted)] mt-0.5">Rule-based screening, not a final decision</p>
               </div>
-              <span className="badge-high text-xs px-2 py-0.5 rounded-full font-bold">
+              <span className="badge-high text-xs px-2 py-0.5 rounded-full font-bold whitespace-nowrap">
                 {urgent.length} Urgent
               </span>
             </div>

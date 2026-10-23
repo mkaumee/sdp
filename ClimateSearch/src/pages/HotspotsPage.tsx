@@ -134,7 +134,7 @@ function Hotspots({ data }: { data: AreaData }) {
   return (
     <div className="flex flex-col lg:flex-row h-full overflow-hidden">
       {/* Main List & Map Area */}
-      <div className="flex-1 flex flex-col overflow-y-auto p-4 lg:p-6 space-y-5">
+      <div className="flex-1 flex flex-col overflow-y-auto p-4 lg:p-6 space-y-5 [&>*]:shrink-0">
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>

@@ -262,7 +262,7 @@ export default function SettingsPage() {
             </div>
           )}
 
-          <div className="p-3 rounded-xl bg-[var(--alert-low)] bg-opacity-10 border border-[var(--alert-low)] border-opacity-30 text-[11px] text-[var(--alert-low)]">
+          <div className="badge-low !block !p-3 !rounded-xl !text-[11px] !font-normal">
             <strong>Live Data Notice:</strong> Heat and vegetation readings are computed from the satellite archives for the selected area each time it is analysed.
             They are screening results — ground-truthing is required before investment decisions.
           </div>

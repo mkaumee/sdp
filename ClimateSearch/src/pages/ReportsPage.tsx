@@ -184,7 +184,7 @@ function Reports({ data }: { data: AreaData }) {
   return (
     <div className="flex flex-col lg:flex-row h-full overflow-hidden">
       {/* Left List of Reports */}
-      <div className="flex-1 flex flex-col overflow-y-auto p-4 lg:p-6 space-y-6">
+      <div className="flex-1 flex flex-col overflow-y-auto p-4 lg:p-6 space-y-6 [&>*]:shrink-0">
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
